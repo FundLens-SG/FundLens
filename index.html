@@ -523,7 +523,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
       <div style="font-size:12.5px;line-height:1.65;color:#333;">
         <p style="margin:0 0 14px;font-weight:700;color:#0d1117;font-size:13.5px;">Quick Start Guide</p>
         <div style="margin:0 0 16px;padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #e8e4dc;">
-          <div style="display:flex;gap:10px;margin-bottom:10px;"><span style="background:#0b6b5c;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">1</span><div><strong>Add Holdings</strong> — Tap <strong>+</strong> to add a holding. Choose the type (Unit Trust, Stock, ETF, REIT, Bond, or ILP), then search by name. Fields auto-fill from our database.</div></div>
+          <div style="display:flex;gap:10px;margin-bottom:10px;"><span style="background:#0b6b5c;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">1</span><div><strong>Add Holdings</strong> — Tap <strong>+</strong> to add a holding. Choose the type (Unit Trust, Stock, ETF, REIT, Bond, or ILP), then search by name. Fields auto-fill from our database. Or tap <strong>📷</strong> to scan a document — AI reads your policy statements, fund reports, or portfolio screenshots and fills in the fields automatically.</div></div>
           <div style="display:flex;gap:10px;margin-bottom:10px;"><span style="background:#0b6b5c;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">2</span><div><strong>Enter Values</strong> — Input current value and starting value (cost basis) for each holding. Tick <strong>USD</strong> for US-dollar holdings — it auto-converts to SGD.</div></div>
           <div style="display:flex;gap:10px;margin-bottom:10px;"><span style="background:#0b6b5c;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">3</span><div><strong>Review Analysis</strong> — The <strong>Overview</strong> tab shows portfolio composition, risk score, and P/L. <strong>Returns</strong> shows projected growth. <strong>Health</strong> flags concentration risks.</div></div>
           <div style="display:flex;gap:10px;margin-bottom:10px;"><span style="background:#0b6b5c;color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">4</span><div><strong>For ILP Policies</strong> — Select &quot;ILP&quot; type, add sub-funds with allocations. Enter premium details for yield projection.</div></div>
@@ -570,7 +570,22 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 </div>
 
 <!-- MOBILE FAB — fixed, outside .app -->
-<button class="mob-fab" onclick="addHolding()" title="Add Holding">＋</button>
+<button class="mob-fab" onclick="showAddMenu()" title="Add Holding">＋</button>
+
+<!-- ADD HOLDING MENU -->
+<div id="add-menu" style="display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.5);" onclick="if(event.target===this)this.style.display='none'">
+  <div style="position:absolute;bottom:90px;right:16px;background:#fff;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,0.25);padding:8px;min-width:220px;">
+    <div style="padding:8px 12px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">Add New Holding</div>
+    <button onclick="document.getElementById('add-menu').style.display='none';addHolding()" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px;border:none;background:none;cursor:pointer;border-radius:8px;text-align:left;font-family:inherit;font-size:13px;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='none'">
+      <span style="width:36px;height:36px;background:var(--teal-light);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">✏️</span>
+      <div><div style="font-weight:600;color:var(--ink);">Manual Entry</div><div style="font-size:10px;color:var(--muted);">Search & fill in details yourself</div></div>
+    </button>
+    <button onclick="document.getElementById('add-menu').style.display='none';scanNewHolding()" style="display:flex;align-items:center;gap:10px;width:100%;padding:12px;border:none;background:none;cursor:pointer;border-radius:8px;text-align:left;font-family:inherit;font-size:13px;" onmouseover="this.style.background='#f5f5f5'" onmouseout="this.style.background='none'">
+      <span style="width:36px;height:36px;background:rgba(109,63,160,0.1);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;">📷</span>
+      <div><div style="font-weight:600;color:var(--ink);">Scan Document</div><div style="font-size:10px;color:var(--muted);">Photo policy statements, fund reports</div></div>
+    </button>
+  </div>
+</div>
 
 <!-- MOBILE BOTTOM NAV — fixed, outside .app -->
 <div class="bottom-nav">
@@ -784,7 +799,8 @@ html, body { overflow-x: hidden; max-width: 100vw; }
     <div>
       <div style="font-size:13px;color:var(--muted);">Enter each fund, stock, or instrument individually. Returns are p.a. figures.</div>
     </div>
-    <button class="btn btn-teal" onclick="addHolding()">+ Add Holding</button>
+    <button class="btn btn-teal" onclick="addHolding()">+ Manual</button>
+    <button class="btn btn-ghost" style="color:#6d3fa0;border-color:#6d3fa0;" onclick="scanNewHolding()">📷 Scan</button>
   </div>
   <div id="holdings-list">
     <div class="empty"><span class="empty-icon">📁</span>No holdings yet. Click "+ Add Holding" to start.</div>
@@ -2798,33 +2814,33 @@ var FUND_DB=[
 ['Kweichow Moutai','equity','cn','consumer_staple',2,null,null],
 ['BiliBili','equity','cn','media',7,null,null],
 ['Trip.com','equity','cn','consumer_disc',5,null,null],
-['DBS Group Holdings','equity','global','financials',3,null,null],
-['OCBC Bank','equity','global','financials',3,null,null],
-['UOB','equity','global','financials',3,null,null],
-['Singtel','equity','global','telecom',3,null,null],
+['DBS Group Holdings','equity','sg','financials',3,null,null],
+['OCBC Bank','equity','sg','financials',3,null,null],
+['UOB','equity','sg','financials',3,null,null],
+['Singtel','equity','sg','telecom',3,null,null],
 ['Singapore Airlines','equity','sg','industrials',5,null,null],
-['Keppel Corp','equity','global','industrials',3,null,null],
-['Sembcorp Industries','equity','global','energy',4,null,null],
-['Wilmar International','equity','global','agri',3,null,null],
-['CapitaLand Investment','equity','global','realestate',3,null,null],
-['Venture Corp','equity','global','tech',3,null,null],
-['ST Engineering','equity','global','aerospace',2,null,null],
-['ComfortDelGro','equity','global','industrials',3,null,null],
+['Keppel Corp','equity','sg','industrials',3,null,null],
+['Sembcorp Industries','equity','sg','energy',4,null,null],
+['Wilmar International','equity','sg','agri',3,null,null],
+['CapitaLand Investment','equity','sg','realestate',3,null,null],
+['Venture Corp','equity','sg','tech',3,null,null],
+['ST Engineering','equity','sg','aerospace',2,null,null],
+['ComfortDelGro','equity','sg','industrials',3,null,null],
 ['Singapore Exchange','equity','sg','financials',2,null,null],
 ['iFAST Corporation','equity','global','fintech',5,null,null],
 ['Sea Limited','equity','global','tech',7,null,null],
 ['Grab Holdings','equity','global','tech',6,null,null],
-['CapitaLand Integrated Commercial Trust','reit','global','realestate',3,null,null],
-['CapitaLand Ascendas REIT','reit','global','realestate',3,null,null],
-['Mapletree Logistics Trust','reit','global','realestate',3,null,null],
-['Mapletree Industrial Trust','reit','global','realestate',3,null,null],
+['CapitaLand Integrated Commercial Trust','reit','sg','realestate',3,null,null],
+['CapitaLand Ascendas REIT','reit','sg','realestate',3,null,null],
+['Mapletree Logistics Trust','reit','sg','realestate',3,null,null],
+['Mapletree Industrial Trust','reit','sg','realestate',3,null,null],
 ['Mapletree Pan Asia Commercial Trust','reit','asia','realestate',3,null,null],
-['Keppel DC REIT','reit','global','realestate',3,null,null],
-['Parkway Life REIT','reit','global','healthcare',2,null,null],
+['Keppel DC REIT','reit','sg','realestate',3,null,null],
+['Parkway Life REIT','reit','sg','healthcare',2,null,null],
 ['Suntec REIT','reit','global','realestate',3,null,null],
 ['Frasers Logistics Trust','reit','global','realestate',3,null,null],
-['Frasers Centrepoint Trust','reit','global','realestate',2,null,null],
-['Ascott Residence Trust','reit','global','realestate',3,null,null],
+['Frasers Centrepoint Trust','reit','sg','realestate',2,null,null],
+['Ascott Residence Trust','reit','sg','realestate',3,null,null],
 ['AIA Group','equity','asia','insurance',3,null,null],
 ['HSBC Holdings','equity','global','financials',3,null,null],
 ['Samsung Electronics','equity','asia','semiconductor',4,null,null],
@@ -3922,6 +3938,303 @@ function clearLiveMetrics(h) {
 }
 
 // ── Main fetch dispatcher ──
+// ── Document Scanner (Claude Vision API) ──
+function showAddMenu() {
+  document.getElementById('add-menu').style.display = '';
+}
+
+function getScanAPIKey() {
+  var key = null;
+  try { key = localStorage.getItem('fundlens_anthropic_key'); } catch(e) {}
+  if (key) return key;
+  key = prompt('To use document scanning, enter your Anthropic API key.\nGet one free at console.anthropic.com\n\nYour key is stored locally and never sent anywhere except Anthropic.');
+  if (!key) return null;
+  try { localStorage.setItem('fundlens_anthropic_key', key.trim()); } catch(e) {}
+  return key.trim();
+}
+
+function scanNewHolding() {
+  var apiKey = getScanAPIKey();
+  if (!apiKey) return;
+
+  // Open file picker — camera or gallery, multiple photos
+  var inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.multiple = true;
+  inp.onchange = function() {
+    if (!inp.files || !inp.files.length) return;
+    var files = Array.prototype.slice.call(inp.files);
+    if (files.length > 8) { showToast('Max 8 images — using first 8'); files = files.slice(0,8); }
+
+    // Create a placeholder holding
+    addHolding();
+    var h = holdings[holdings.length-1];
+    h.name = '⏳ Scanning...';
+    h._open = false;
+    renderHoldings();
+
+    processScan(h.id, files, apiKey);
+  };
+  inp.click();
+}
+
+function scanHolding(holdingId) {
+  var h = holdings.find(function(x){return x.id===holdingId;});
+  if (!h) return;
+  var apiKey = getScanAPIKey();
+  if (!apiKey) return;
+
+  var inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.multiple = true;
+  inp.onchange = function() {
+    if (!inp.files || !inp.files.length) return;
+    var files = Array.prototype.slice.call(inp.files);
+    if (files.length > 8) { showToast('Max 8 images — using first 8'); files = files.slice(0,8); }
+    processScan(holdingId, files, apiKey);
+  };
+  inp.click();
+}
+
+function processScan(holdingId, files, apiKey) {
+  var h = holdings.find(function(x){return x.id===holdingId;});
+  if (!h) return;
+
+  // Show scanning banner
+  var row = document.getElementById('hrow-'+holdingId);
+  if (row) {
+    var banner = document.createElement('div');
+    banner.id = 'scan-banner-'+holdingId;
+    banner.style.cssText = 'background:linear-gradient(135deg,#6d3fa0,#8b5cf6);color:#fff;padding:12px 14px;border-radius:8px;margin:8px 0;font-size:12px;font-weight:600;display:flex;align-items:center;gap:8px;';
+    banner.innerHTML = '<span class="scan-spin">⏳</span> Scanning '+files.length+' image'+(files.length>1?'s':'')+' with AI — this may take a few seconds...'
+      +'<style>.scan-spin{display:inline-block;animation:scanr 1s linear infinite}@keyframes scanr{from{transform:rotate(0)}to{transform:rotate(360deg)}}</style>';
+    row.appendChild(banner);
+  }
+
+  // Convert all images to base64
+  var promises = files.map(function(file) {
+    return new Promise(function(resolve) {
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var dataUrl = e.target.result;
+        resolve({base64:dataUrl.split(',')[1], mediaType:dataUrl.split(';')[0].split(':')[1]||'image/jpeg'});
+      };
+      reader.readAsDataURL(file);
+    });
+  });
+
+  Promise.all(promises).then(function(images) {
+    var systemPrompt = 'You are a financial document data extractor for Singapore financial advisors. '
+      +'You will receive photos of investment documents (policy statements, annual reports, fund fact sheets, portfolio summaries). '
+      +'Extract ALL key data and return ONLY valid JSON — no markdown, no backticks, no explanation text.\n\n'
+      +'IMPORTANT: If the document is an ILP (Investment-Linked Policy), use the ILP schema. Otherwise use the standard schema.\n\n'
+      +'ILP Schema (for insurance investment policies from AIA, Prudential, Great Eastern, Manulife, NTUC Income, etc.):\n'
+      +'{\n'
+      +'  "type": "ilp",\n'
+      +'  "policyName": "full product name",\n'
+      +'  "policyNumber": "policy number if visible",\n'
+      +'  "insurer": "insurer name",\n'
+      +'  "premiumAmount": number (per period),\n'
+      +'  "premiumFreq": "monthly" or "annual" or "single",\n'
+      +'  "premiumYears": payment term in years,\n'
+      +'  "startYear": year policy started (number, e.g. 2015),\n'
+      +'  "totalPremiumsPaid": total premiums paid to date (number),\n'
+      +'  "cashValue": current account/cash value (number),\n'
+      +'  "surrenderValue": surrender value if shown (number),\n'
+      +'  "deathBenefit": sum assured / death benefit if shown (number),\n'
+      +'  "funds": [\n'
+      +'    {"name": "sub-fund name exactly as shown", "alloc": percentage number, "value": fund value number, "units": units if shown}\n'
+      +'  ],\n'
+      +'  "fees": annual management charge % if shown,\n'
+      +'  "notes": "any other important info (riders, bonuses, loyalty credits)"\n'
+      +'}\n\n'
+      +'Standard Schema (for unit trusts, stocks, ETFs, REITs, bonds, savings):\n'
+      +'{\n'
+      +'  "type": "standard",\n'
+      +'  "holdingName": "investment name",\n'
+      +'  "holdingType": "ut" or "stock" or "etf" or "reit" or "bond" or "other",\n'
+      +'  "currentValue": market value (number),\n'
+      +'  "costBasis": total cost / starting value (number),\n'
+      +'  "startDate": "YYYY-MM" when invested,\n'
+      +'  "units": number of units/shares,\n'
+      +'  "nav": net asset value per unit,\n'
+      +'  "currency": "SGD" or "USD",\n'
+      +'  "platform": "iFAST/FSMOne/Endowus/etc if shown",\n'
+      +'  "notes": "account number, any other info"\n'
+      +'}\n\n'
+      +'If multiple products are visible in the images, return an array of objects. '
+      +'All monetary values must be plain numbers (no $ signs, no commas). Use null for fields not found.';
+
+    // Build content array
+    var content = images.map(function(img) {
+      return {type:'image', source:{type:'base64', media_type:img.mediaType, data:img.base64}};
+    });
+    content.push({type:'text', text:'Extract all financial data from these document image(s). Return ONLY the JSON.'});
+
+    fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4000,
+        system: systemPrompt,
+        messages: [{role:'user', content:content}]
+      })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      var sb = document.getElementById('scan-banner-'+holdingId);
+      if (sb) sb.remove();
+
+      if (data.error) {
+        if (h.name === '⏳ Scanning...') h.name = 'New Holding';
+        renderHoldings();
+        alert('API Error: '+(data.error.message||JSON.stringify(data.error)));
+        if (data.error.message && data.error.message.indexOf('key')>=0) {
+          try { localStorage.removeItem('fundlens_anthropic_key'); } catch(e) {}
+        }
+        return;
+      }
+
+      var text = '';
+      if (data.content) data.content.forEach(function(c){ if(c.type==='text') text+=c.text; });
+      text = text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
+
+      try {
+        var parsed = JSON.parse(text);
+        // Handle array (multiple products) or single object
+        var results = Array.isArray(parsed) ? parsed : [parsed];
+
+        // Apply first result to existing holding
+        applyScanData(holdingId, results[0]);
+
+        // Create additional holdings for extra results
+        for (var i=1; i<results.length; i++) {
+          addHolding();
+          var newH = holdings[holdings.length-1];
+          newH._open = false;
+          applyScanData(newH.id, results[i]);
+        }
+
+        renderHoldings();
+        refreshAnalysis();
+        _doAutoSave();
+        showToast('📷 Scanned '+results.length+' product'+(results.length>1?'s':'')+' successfully');
+      } catch(e) {
+        if (h.name === '⏳ Scanning...') h.name = 'New Holding';
+        renderHoldings();
+        alert('Could not parse scan result.\n\n'+text.substring(0,500));
+      }
+    })
+    .catch(function(err) {
+      var sb = document.getElementById('scan-banner-'+holdingId);
+      if (sb) sb.remove();
+      if (h.name === '⏳ Scanning...') h.name = 'New Holding';
+      renderHoldings();
+      alert('Scan failed: '+err.message);
+    });
+  });
+}
+
+function applyScanData(holdingId, data) {
+  var h = holdings.find(function(x){return x.id===holdingId;});
+  if (!h || !data) return;
+
+  if (data.type === 'ilp') {
+    // ── ILP POLICY ──
+    h.type = 'ilp';
+    h.assetClass = 'mixed';
+    if (data.policyName) h.name = data.policyName;
+    if (data.cashValue) h.value = Math.round(+data.cashValue);
+    if (data.totalPremiumsPaid) h.cost = Math.round(+data.totalPremiumsPaid);
+    if (data.premiumAmount) h.premAmt = +data.premiumAmount;
+    if (data.premiumFreq) h.premFreq = data.premiumFreq;
+    if (data.premiumYears) h.premYrs = +data.premiumYears;
+    if (data.startYear) h.startYear = +data.startYear;
+    if (data.fees) h.ter = +data.fees;
+
+    // Notes: combine policy number + any notes
+    var notesParts = [];
+    if (data.policyNumber) notesParts.push(data.policyNumber);
+    if (data.deathBenefit) notesParts.push('SA: $'+Math.round(data.deathBenefit).toLocaleString());
+    if (data.surrenderValue) notesParts.push('SV: $'+Math.round(data.surrenderValue).toLocaleString());
+    if (data.notes) notesParts.push(data.notes);
+    if (notesParts.length) h.notes = (h.notes ? h.notes+' · ' : '') + notesParts.join(' · ');
+
+    // Sub-funds
+    if (data.funds && data.funds.length) {
+      if (!h.ilpFunds) h.ilpFunds = [];
+      data.funds.forEach(function(sf) {
+        if (!sf.name) return;
+        var newFund = {
+          id:'sf'+Date.now()+Math.random().toString(36).slice(2,5),
+          name:sf.name, alloc:sf.alloc?+sf.alloc:0, fundValue:sf.value?Math.round(+sf.value):null,
+          assetClass:'equity', region:'global', sector:'multi_sector', risk:6,
+          hist1y:null,hist3y:null,hist5y:null,hist10y:null,histAvg:null,ter:null
+        };
+        // Match against fund DB for auto-fill
+        var match = fundSearch(sf.name,'ut');
+        if (match.length>0) {
+          newFund.name = match[0].name;
+          newFund.assetClass = match[0].ac;
+          newFund.region = match[0].region;
+          newFund.sector = match[0].sector;
+          newFund.risk = match[0].risk;
+        }
+        h.ilpFunds.push(newFund);
+      });
+    }
+
+    // Calculate yield from premiums
+    if (h.premAmt) calcILPYield(h);
+    h._open = true;
+
+  } else {
+    // ── STANDARD HOLDING ──
+    var typeMap = {ut:'ut',stock:'stock',etf:'etf',reit:'reit',bond:'bond',other:'other'};
+    if (data.holdingType && typeMap[data.holdingType]) h.type = data.holdingType;
+
+    if (data.holdingName) {
+      var match = fundSearch(data.holdingName, h.type);
+      if (match.length>0) {
+        h.name = match[0].name;
+        h.assetClass = match[0].ac;
+        h.region = match[0].region;
+        h.sector = match[0].sector;
+        h.risk = match[0].risk;
+        if (match[0].incep) h.incepDate = match[0].incep;
+        if (match[0].isin) h.isin = match[0].isin;
+      } else {
+        h.name = data.holdingName;
+      }
+    }
+
+    if (data.currentValue) h.value = Math.round(+data.currentValue);
+    if (data.costBasis) h.cost = Math.round(+data.costBasis);
+    if (data.startDate) h.startDate = data.startDate;
+
+    if (data.currency === 'USD') {
+      h.usdValue = data.currentValue ? +data.currentValue : null;
+      h.usdCost = data.costBasis ? +data.costBasis : null;
+      if (h.usdValue) h.value = Math.round(h.usdValue * USDSGD_RATE);
+      if (h.usdCost) h.cost = Math.round(h.usdCost * USDSGD_RATE);
+    }
+
+    var notes = [];
+    if (data.platform) notes.push(data.platform);
+    if (data.notes) notes.push(data.notes);
+    if (notes.length) h.notes = (h.notes ? h.notes+' · ' : '') + notes.join(' · ');
+    h._open = true;
+  }
+}
+
 function fetchStockMetrics(holdingId) {
   var h = holdings.find(function(x){return x.id===holdingId;});
   if (!h) return;
@@ -4567,6 +4880,7 @@ function renderHoldings() {
           +(isILP && !open ? '<span style="font-size:10px;color:var(--purple);font-weight:500;">'+ilpFundsSummary+'</span>' : '')
           +(h.value>0?'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:11.5px;font-weight:600;color:'+(isILP?'var(--purple)':'var(--teal)')+';">'+fmtSGD(h.value)+'</span>':'')
           +'<button onclick="toggleHolding(\''+h.id+'\')" style="background:rgba(0,0,0,0.06);border:none;border-radius:5px;padding:5px 9px;font-size:11px;cursor:pointer;color:var(--muted);font-weight:600;white-space:nowrap;min-height:32px;flex-shrink:0;">'+(open?'▲':'✏')+'</button>'
+          +'<button onclick="scanHolding(\''+h.id+'\')" style="background:rgba(109,63,160,0.08);border:none;border-radius:5px;padding:5px 8px;color:#6d3fa0;cursor:pointer;font-size:11px;font-weight:600;min-height:32px;flex-shrink:0;" title="Scan document / photo">📷</button>'
           +'<button onclick="window.open(\'https://www.google.com/search?q=\'+encodeURIComponent(\''+escHtml(h.name)+' SGD fund factsheet\'),\'_blank\')" style="background:rgba(26,86,219,0.08);border:none;border-radius:5px;padding:5px 8px;color:#1a56db;cursor:pointer;font-size:11px;font-weight:600;min-height:32px;flex-shrink:0;" title="Search factsheet on Google">📄</button>'
           +'<button onclick="removeHolding(\''+h.id+'\')" style="background:var(--coral-light);border:none;border-radius:5px;padding:5px 8px;color:var(--coral);cursor:pointer;font-size:13px;font-weight:700;min-height:32px;flex-shrink:0;">✕</button>'
         +'</div>'
