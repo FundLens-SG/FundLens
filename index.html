@@ -3379,47 +3379,13 @@ var TICKER_MAP = {
 };
 
 var FMP_API_KEY = 'dvFHWQOExGtd6PUZXTVm9T4jmyNQPs4G';
+var FINNHUB_KEY = 'd73mejhr01qjjol3i5l0d73mejhr01qjjol3i5lg'; // Get free key at finnhub.io/register (60 calls/min, native CORS)
 
-// Yahoo Finance fallback for SG/HK/international stocks not covered by FMP free tier
-// Tries Yahoo query endpoint which has broader exchange coverage
-function fetchYahooFallback(holdingId, ticker) {
-  var statusEl = document.querySelector('#fmp-status-'+holdingId);
-  if (statusEl) statusEl.innerHTML = '<span style="color:var(--teal);">⏳ Fetching '+ticker+' from Yahoo Finance...</span>';
-  var rawUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=5y&interval=1mo&includePrePost=false';
-  var proxies = ['https://corsproxy.io/?url=','https://api.allorigins.win/raw?url='];
-  function tryProxy(idx) {
-    if (idx >= proxies.length) {
-      var hh = holdings.find(function(x){return x.id===holdingId;});
-      if (statusEl && hh) statusEl.innerHTML = '<span style="color:var(--muted);">Using database risk rating (R'+(hh.risk||5)+'). Live metrics unavailable.</span>';
-      return;
-    }
-    doFetchUrl(proxies[idx] + encodeURIComponent(rawUrl), function(data) {
-      if (!data || !data.chart || !data.chart.result || !data.chart.result[0]) { tryProxy(idx+1); return; }
-      var meta = data.chart.result[0].meta;
-      var prices = data.chart.result[0].indicators.quote[0].close;
-      var returns = [];
-      for (var i=1; i<prices.length; i++) {
-        if (prices[i] && prices[i-1] && prices[i-1]>0) returns.push((prices[i]-prices[i-1])/prices[i-1]);
-      }
-      if (returns.length < 3) { tryProxy(idx+1); return; }
-      var avgR = returns.reduce(function(s,r){return s+r;},0)/returns.length;
-      var variance = returns.reduce(function(s,r){return s+Math.pow(r-avgR,2);},0)/(returns.length-1);
-      var annualVol = Math.round(Math.sqrt(variance)*Math.sqrt(12)*100);
-      var estBeta = Math.round((annualVol/100)/0.16*100)/100;
-      var hh = holdings.find(function(x){return x.id===holdingId;});
-      if (!hh) return;
-      hh.fmpBeta = estBeta; hh.fmpDE = null; hh.fmpVol = annualVol;
-      hh.fmpMktCap = (meta.regularMarketPrice||0)*(meta.regularMarketVolume||1)*250;
-      hh.fmpQual = 3; hh.fmpSource = 'Yahoo';
-      hh.risk = calcStockRisk(estBeta, annualVol, 1.0, 3);
-      renderHoldings(); refreshAnalysis();
-      showToast(ticker+' (Yahoo): β≈'+estBeta.toFixed(2)+' σ≈'+annualVol+'% → R'+hh.risk);
-    });
-  }
-  tryProxy(0);
-}
+// CORS proxy chain — Cloudflare Worker first (set up your own for guaranteed reliability)
+var CF_WORKER_URL = 'https://fundlens-proxy.chungakwanc.workers.dev/?url='; // e.g. 'https://fundlens-proxy.YOUR-SUBDOMAIN.workers.dev/?url='
+var CORS_PROXIES = [CF_WORKER_URL,'https://corsproxy.io/?','https://api.allorigins.win/raw?url='].filter(function(p){return !!p;});
 
-// Generic XHR fetch helper
+// ── CORS proxy helper ──
 function doFetchUrl(url, cb) {
   try {
     var xhr = new XMLHttpRequest();
@@ -3431,80 +3397,175 @@ function doFetchUrl(url, cb) {
     xhr.send();
   } catch(e) { cb(null); }
 }
+function fetchWithProxies(url, cb, idx) {
+  idx = idx || 0;
+  if (idx >= CORS_PROXIES.length) { cb(null); return; }
+  var full = CORS_PROXIES[idx] + encodeURIComponent(url);
+  doFetchUrl(full, function(data) {
+    if (data) { cb(data); return; }
+    fetchWithProxies(url, cb, idx+1);
+  });
+}
 
-// Compute quantitative risk rating from metrics
-function calcStockRisk(beta, vol, de, qual) {
+// ── CFA-aligned sector-adjusted risk scoring ──
+// Sector groups for D/E interpretation
+var SECTOR_DE_TREATMENT = {
+  // Banks/financials: inherently leveraged, D/E is meaningless. Ignore D/E, weight capital adequacy via qual.
+  financials:   {deWeight:0.05, betaWeight:0.45, volWeight:0.30, qualWeight:0.20, deNorm: function(de){return 2;}},
+  insurance:    {deWeight:0.05, betaWeight:0.45, volWeight:0.30, qualWeight:0.20, deNorm: function(de){return 2;}},
+  // Utilities: regulated, high D/E is normal. Softer D/E penalty.
+  utilities:    {deWeight:0.10, betaWeight:0.40, volWeight:0.30, qualWeight:0.20, deNorm: function(de){return de<1.5?1:de<3?2:de<5?3:4;}},
+  // REITs: gearing up to ~0.5 is normal, up to 1.0 acceptable.
+  realestate:   {deWeight:0.10, betaWeight:0.40, volWeight:0.30, qualWeight:0.20, deNorm: function(de){return de<0.5?1:de<1.0?2:de<1.5?3:de<2.5?4:5;}},
+  // Pharma/biotech: pipeline risk > balance sheet. Heavy qual weight.
+  pharma:       {deWeight:0.10, betaWeight:0.35, volWeight:0.25, qualWeight:0.30, deNorm: function(de){return de<1?1:de<2?2:de<4?3:4;}},
+  biotech:      {deWeight:0.05, betaWeight:0.30, volWeight:0.30, qualWeight:0.35, deNorm: function(de){return de<0.5?1:de<1.5?2:3;}},
+  healthcare:   {deWeight:0.15, betaWeight:0.40, volWeight:0.25, qualWeight:0.20, deNorm: null},
+  // Tech/growth: standard model but cap D/E impact (many are cash-rich with low D/E)
+  tech:         {deWeight:0.15, betaWeight:0.40, volWeight:0.30, qualWeight:0.15, deNorm: null},
+  semiconductor:{deWeight:0.15, betaWeight:0.40, volWeight:0.30, qualWeight:0.15, deNorm: null},
+  // Crypto/speculative: vol and qual dominate
+  crypto_block: {deWeight:0.05, betaWeight:0.30, volWeight:0.35, qualWeight:0.30, deNorm: function(de){return 3;}},
+};
+
+function calcStockRisk(beta, vol, de, qual, sector) {
   var bs = beta<0.8?1:beta<1.0?2:beta<1.2?3:beta<1.5?4:beta<2.0?5:6;
   var vs = vol<15?1:vol<25?2:vol<35?3:vol<50?4:vol<70?5:6;
-  var ds = (de===0||de===null)?5:de<0.3?1:de<0.8?2:de<1.5?3:de<3?4:de<5?5:6;
-  var raw = 0.40*bs + 0.25*vs + 0.20*ds + 0.15*(qual||3);
+  // D/E scoring (default)
+  var ds;
+  var treatment = sector ? SECTOR_DE_TREATMENT[sector] : null;
+  if (treatment && treatment.deNorm) {
+    ds = treatment.deNorm(de||0);
+  } else {
+    ds = (de===null||de===undefined)?3:(de===0?5:de<0.3?1:de<0.8?2:de<1.5?3:de<3?4:de<5?5:6);
+  }
+  // Weights (sector-adjusted or default)
+  var bW = treatment ? treatment.betaWeight : 0.40;
+  var vW = treatment ? treatment.volWeight  : 0.25;
+  var dW = treatment ? treatment.deWeight   : 0.20;
+  var qW = treatment ? treatment.qualWeight : 0.15;
+  var raw = bW*bs + vW*vs + dW*ds + qW*(qual||3);
   return Math.max(1, Math.min(10, Math.round(raw*10/6)));
 }
 
-// Fetch live metrics from FMP API
+// ── Clear metrics when stock name changes ──
+function clearLiveMetrics(h) {
+  h.fmpBeta = null; h.fmpDE = null; h.fmpVol = null;
+  h.fmpMktCap = null; h.fmpQual = null; h.fmpSource = null;
+}
+
+// ── Main fetch dispatcher ──
 function fetchStockMetrics(holdingId) {
   var h = holdings.find(function(x){return x.id===holdingId;});
   if (!h) return;
   var ticker = TICKER_MAP[h.name];
   if (!ticker) return;
 
-  // Route: SG/HK/China tickers → Yahoo Finance, US tickers → FMP
-  var isIntl = /\.(SI|HK|SS|SZ|NS|KS|AX)$/i.test(ticker) || /^(TCEHY|BYDDY|XIACF|MPNGY|PNGAY|MOUTF|SSNLF|SFTBY|AAGIY|NSRGY|LVMUY)$/i.test(ticker);
-  
-  if (isIntl) {
-    fetchYahooFallback(holdingId, ticker);
-  } else {
-    fetchFMPMetrics(holdingId, ticker);
-  }
-}
+  // Clear old metrics first
+  clearLiveMetrics(h);
 
-function fetchFMPMetrics(holdingId, ticker) {
-  var h = holdings.find(function(x){return x.id===holdingId;});
-  if (!h) return;
   var statusEl = document.querySelector('#fmp-status-'+holdingId);
-  if (statusEl) statusEl.innerHTML = '<span style="color:var(--teal);">⏳ Fetching '+ticker+' from FMP...</span>';
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--teal);">⏳ Fetching '+ticker+'...</span>';
 
-  var key = FMP_API_KEY;
-  var profileUrl = 'https://financialmodelingprep.com/api/v3/profile/'+encodeURIComponent(ticker)+'?apikey='+key;
-  var ratiosUrl = 'https://financialmodelingprep.com/api/v3/ratios-ttm/'+encodeURIComponent(ticker)+'?apikey='+key;
-  
-  // Try multiple CORS proxies in sequence
-  var proxies = [
-    '',  // direct (works if no CORS issue)
-    'https://corsproxy.io/?url=',
-    'https://api.allorigins.win/raw?url='
-  ];
+  // PRIMARY: Yahoo Finance quoteSummary (works for ALL exchanges: US, SG, HK, CN)
+  var yahooUrl = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/'+encodeURIComponent(ticker)+'?modules=defaultKeyStatistics,financialData,summaryProfile,price';
+  fetchWithProxies(yahooUrl, function(yData) {
+    var stats = null, finData = null, profile = null, price = null;
+    try {
+      var r = yData.quoteSummary.result[0];
+      stats = r.defaultKeyStatistics || {};
+      finData = r.financialData || {};
+      profile = r.summaryProfile || {};
+      price = r.price || {};
+    } catch(e) {}
 
-  function tryWithProxy(url, proxyIdx, cb) {
-    if (proxyIdx >= proxies.length) { cb(null); return; }
-    var prefix = proxies[proxyIdx];
-    var fullUrl = prefix ? prefix + encodeURIComponent(url) : url;
-    doFetchUrl(fullUrl, function(data) {
-      if (data && (Array.isArray(data) ? data.length > 0 : true)) { cb(data); return; }
-      tryWithProxy(url, proxyIdx + 1, cb);
-    });
-  }
-
-  tryWithProxy(profileUrl, 0, function(pData) {
-    var profile = pData && pData[0] ? pData[0] : null;
-    if (!profile) {
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted);">Using database risk rating (R'+(h.risk||5)+'). Live API unavailable — try again later.</span>';
-      return;
-    }
-    tryWithProxy(ratiosUrl, 0, function(rData) {
-      var ratios = rData && rData[0] ? rData[0] : null;
-      var beta = profile.beta || null;
-      var mktCap = profile.mktCap || 0;
-      var de = ratios ? (ratios.debtEquityRatioTTM || 0) : 0;
-      if (de < 0) de = 0;
+    if (stats && (stats.beta || finData.debtToEquity)) {
+      // Yahoo succeeded — extract metrics
+      var beta = (stats.beta && stats.beta.raw) ? stats.beta.raw : null;
+      var de = (finData.debtToEquity && finData.debtToEquity.raw) ? finData.debtToEquity.raw / 100 : null; // Yahoo returns as %, convert
+      var mktCap = (price.marketCap && price.marketCap.raw) ? price.marketCap.raw : 0;
       var estVol = beta ? Math.round(Math.abs(beta) * 16) : 25;
       var qual = mktCap > 200e9 ? 1 : mktCap > 50e9 ? 2 : mktCap > 10e9 ? 3 : mktCap > 2e9 ? 4 : 5;
-      var risk = calcStockRisk(beta||1.0, estVol, de, qual);
+      var sector = h.sector || null;
 
       h.fmpBeta = beta; h.fmpDE = de; h.fmpVol = estVol;
-      h.fmpMktCap = mktCap; h.fmpQual = qual; h.fmpSource = 'FMP'; h.risk = risk;
+      h.fmpMktCap = mktCap; h.fmpQual = qual; h.fmpSource = 'Yahoo';
+      h.risk = calcStockRisk(beta||1.0, estVol, de, qual, sector);
       renderHoldings(); refreshAnalysis();
-      showToast(ticker+': β='+((beta||0).toFixed(2))+' D/E='+((de||0).toFixed(2))+' σ≈'+estVol+'% → R'+risk);
+      showToast(ticker+': β='+((beta||0).toFixed(2))+' D/E='+((de||0).toFixed(2))+' σ≈'+estVol+'% → R'+h.risk);
+      return;
+    }
+
+    // FALLBACK: Yahoo chart endpoint (calculate from prices)
+    var chartUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=5y&interval=1mo';
+    fetchWithProxies(chartUrl, function(cData) {
+      if (cData && cData.chart && cData.chart.result && cData.chart.result[0]) {
+        var prices = cData.chart.result[0].indicators.quote[0].close;
+        var meta = cData.chart.result[0].meta;
+        var returns = [];
+        for (var i=1; i<prices.length; i++) {
+          if (prices[i] && prices[i-1] && prices[i-1]>0) returns.push((prices[i]-prices[i-1])/prices[i-1]);
+        }
+        if (returns.length >= 6) {
+          var avgR = returns.reduce(function(s,r){return s+r;},0)/returns.length;
+          var variance = returns.reduce(function(s,r){return s+Math.pow(r-avgR,2);},0)/(returns.length-1);
+          var annualVol = Math.round(Math.sqrt(variance)*Math.sqrt(12)*100);
+          var estBeta = Math.round((annualVol/100)/0.16*100)/100;
+          h.fmpBeta = estBeta; h.fmpDE = null; h.fmpVol = annualVol;
+          h.fmpMktCap = (meta.regularMarketPrice||0)*(meta.regularMarketVolume||1)*250;
+          h.fmpQual = 3; h.fmpSource = 'Yahoo (chart)';
+          h.risk = calcStockRisk(estBeta, annualVol, 1.0, 3, h.sector);
+          renderHoldings(); refreshAnalysis();
+          showToast(ticker+' (chart): β≈'+estBeta.toFixed(2)+' σ≈'+annualVol+'% → R'+h.risk);
+          return;
+        }
+      }
+
+      // FALLBACK 3: FMP (US stocks, via CORS proxy)
+      var fmpUrl = 'https://financialmodelingprep.com/api/v3/profile/'+encodeURIComponent(ticker)+'?apikey='+FMP_API_KEY;
+      fetchWithProxies(fmpUrl, function(fData) {
+        if (fData && fData[0]) {
+          var p = fData[0];
+          var beta = p.beta||null, mktCap = p.mktCap||0;
+          var estVol = beta ? Math.round(Math.abs(beta)*16) : 25;
+          var qual = mktCap>200e9?1:mktCap>50e9?2:mktCap>10e9?3:mktCap>2e9?4:5;
+          h.fmpBeta=beta; h.fmpDE=null; h.fmpVol=estVol; h.fmpMktCap=mktCap;
+          h.fmpQual=qual; h.fmpSource='FMP';
+          h.risk=calcStockRisk(beta||1.0,estVol,null,qual,h.sector);
+          renderHoldings(); refreshAnalysis();
+          showToast(ticker+' (FMP): β='+((beta||0).toFixed(2))+' → R'+h.risk);
+          return;
+        }
+
+        // FALLBACK 4: Finnhub (has native CORS — no proxy needed, 60 calls/min)
+        if (FINNHUB_KEY) {
+          if (statusEl) statusEl.innerHTML = '<span style="color:var(--teal);">⏳ Trying Finnhub for '+ticker+'...</span>';
+          var fhUrl = 'https://finnhub.io/api/v1/stock/metric?symbol='+encodeURIComponent(ticker)+'&metric=all&token='+FINNHUB_KEY;
+          doFetchUrl(fhUrl, function(fhData) {
+            if (fhData && fhData.metric) {
+              var m = fhData.metric;
+              var beta = m.beta || null;
+              var de = m['totalDebt/totalEquityAnnual'] || null;
+              var vol = m['52WeekHigh'] && m['52WeekLow'] && m['52WeekHigh']>0
+                ? Math.round(((m['52WeekHigh']-m['52WeekLow'])/((m['52WeekHigh']+m['52WeekLow'])/2))*100/2)
+                : (beta ? Math.round(Math.abs(beta)*16) : 25);
+              var mktCap = m.marketCapitalization ? m.marketCapitalization * 1e6 : 0;
+              var qual = mktCap>200e9?1:mktCap>50e9?2:mktCap>10e9?3:mktCap>2e9?4:5;
+              h.fmpBeta=beta; h.fmpDE=de; h.fmpVol=vol; h.fmpMktCap=mktCap;
+              h.fmpQual=qual; h.fmpSource='Finnhub';
+              h.risk=calcStockRisk(beta||1.0,vol,de,qual,h.sector);
+              renderHoldings(); refreshAnalysis();
+              showToast(ticker+' (Finnhub): β='+((beta||0).toFixed(2))+' D/E='+((de||0).toFixed(2))+' → R'+h.risk);
+              return;
+            }
+            // Everything failed
+            if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted);">Using database risk rating (R'+(h.risk||5)+'). All live sources unavailable.</span>';
+          });
+          return;
+        }
+        // No Finnhub key — final failure
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted);">Using database risk rating (R'+(h.risk||5)+'). All live sources unavailable.</span>';
+      });
     });
   });
 }
@@ -3993,12 +4054,11 @@ function renderStandardHoldingForm(h, typeOpts, acOpts, regOpts, riskColor) {
   // Bottom metrics panel
   var metricsHtml = '';
   var formulaHtml = '<div style="margin-top:6px;padding-top:5px;border-top:1px dashed #e0ddd5;font-size:7.5px;color:#aaa;line-height:1.5;">'
-    +'<strong>Risk Rating Formula:</strong> R = 40% × Beta Score + 25% × Volatility Score + 20% × Debt/Equity Score + 15% × Qualitative Score, scaled 1–10. '
-    +'Beta: &lt;0.8 = Low, 0.8–1.2 = Market, 1.2–1.5 = Moderate, 1.5–2.0 = High, &gt;2.0 = Very High. '
-    +'Volatility (σ): &lt;15% = Low, 15–25% = Average, 25–35% = Elevated, 35–50% = High, 50–70% = Very High, &gt;70% = Extreme. '
-    +'D/E: &lt;0.3 = Conservative, 0.3–0.8 = Moderate, 0.8–1.5 = Average, 1.5–3 = Leveraged, 3–5 = Highly Leveraged, &gt;5 = Extreme. '
-    +'Qualitative: Market cap &gt;$200B = 1, $50–200B = 2, $10–50B = 3, $2–10B = 4, &lt;$2B = 5. '
-    +'Data via Financial Modeling Prep API (financialmodelingprep.com). Sources: SEC EDGAR filings, NASDAQ/NYSE feeds.'
+    +'<strong>Risk Rating Formula:</strong> R = β_w×Beta + σ_w×Volatility + DE_w×Debt/Equity + Q_w×Qualitative, scaled 1–10. '
+    +'Weights are sector-adjusted (CFA methodology): Tech/default 40/25/20/15. Banks/financials: D/E ignored (5/45/30/20) as leverage is structural. '
+    +'Pharma/biotech: pipeline risk weighted higher (30–35% qualitative). Utilities/REITs: D/E softened (regulated/geared models). '
+    +'β: &lt;0.8=Low, 0.8–1.2=Market, &gt;2.0=Very High. σ: &lt;15%=Low, &gt;70%=Extreme. '
+    +'Data: Yahoo Finance quoteSummary API (primary, all exchanges), FMP API (fallback). Sources: SEC EDGAR, SGX, HKEX filings.'
   +'</div>';
 
   if (isStockType && hasTicker) {
