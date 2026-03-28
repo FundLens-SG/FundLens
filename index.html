@@ -3705,6 +3705,52 @@ var TICKER_MAP = {
 var FMP_API_KEY = 'dvFHWQOExGtd6PUZXTVm9T4jmyNQPs4G';
 var FINNHUB_KEY = 'd73mejhr01qjjol3i5l0d73mejhr01qjjol3i5lg'; // Get free key at finnhub.io/register (60 calls/min, native CORS)
 
+// ── USD/SGD exchange rate ──
+var USDSGD_RATE = 1.35; // fallback default
+var USDSGD_FETCHED = false;
+function fetchUSDSGD(cb) {
+  if (USDSGD_FETCHED) { if (cb) cb(USDSGD_RATE); return; }
+  // Try multiple sources
+  var url1 = 'https://open.er-api.com/v6/latest/USD'; // free, no key, CORS enabled
+  doFetchUrl(url1, function(data) {
+    if (data && data.rates && data.rates.SGD) {
+      USDSGD_RATE = Math.round(data.rates.SGD * 10000) / 10000;
+      USDSGD_FETCHED = true;
+      if (cb) cb(USDSGD_RATE);
+      return;
+    }
+    // Fallback: exchangerate.host
+    var url2 = 'https://api.exchangerate.host/latest?base=USD&symbols=SGD';
+    doFetchUrl(url2, function(data2) {
+      if (data2 && data2.rates && data2.rates.SGD) {
+        USDSGD_RATE = Math.round(data2.rates.SGD * 10000) / 10000;
+        USDSGD_FETCHED = true;
+      }
+      if (cb) cb(USDSGD_RATE);
+    });
+  });
+}
+// Auto-fetch on load
+try { fetchUSDSGD(); } catch(e) {}
+
+function convertUSDtoSGD(holdingId) {
+  var h = holdings.find(function(x){return x.id===holdingId;});
+  if (!h) return;
+  var usdInput = document.querySelector('#usd-val-'+holdingId);
+  var sgdInput = document.querySelector('#sgd-val-'+holdingId);
+  var rateLabel = document.querySelector('#usd-rate-'+holdingId);
+  if (!usdInput) return;
+  var usd = parseFloat(usdInput.value) || 0;
+  fetchUSDSGD(function(rate) {
+    var sgd = Math.round(usd * rate);
+    h.value = sgd;
+    h.usdValue = usd;
+    if (sgdInput) sgdInput.value = sgd;
+    if (rateLabel) rateLabel.textContent = '1 USD = ' + rate.toFixed(4) + ' SGD' + (USDSGD_FETCHED ? '' : ' (offline rate)');
+    refreshAnalysis();
+  });
+}
+
 // CORS proxy chain — Cloudflare Worker first (set up your own for guaranteed reliability)
 var CF_WORKER_URL = 'https://fundlens-proxy.chungakwanc.workers.dev/?url='; // e.g. 'https://fundlens-proxy.YOUR-SUBDOMAIN.workers.dev/?url='
 var CORS_PROXIES = [CF_WORKER_URL,'https://corsproxy.io/?','https://api.allorigins.win/raw?url='].filter(function(p){return !!p;});
@@ -4156,6 +4202,7 @@ function addHolding() {
     risk: type[defType].defRisk,
     value: 0,
     cost: 0,
+    usdValue: null,
     hist1y: null, hist3y: null, hist5y: null, hist10y: null,
     histAvg: null,
     ter: 0,
@@ -4188,7 +4235,7 @@ function toggleHolding(id) {
 function updateHolding(id, field, value) {
   var h = holdings.find(function(h){ return h.id===id; });
   if (!h) return;
-  if (['value','cost','risk','hist1y','hist3y','hist5y','hist10y','histAvg','ter','premAmt','premYrs','startYear','divPct'].indexOf(field)!==-1) {
+  if (['value','cost','risk','hist1y','hist3y','hist5y','hist10y','histAvg','ter','premAmt','premYrs','startYear','divPct','usdValue'].indexOf(field)!==-1) {
     h[field] = value === '' ? null : +value;
   } else if (field === 'yieldOverride' || field === 'divReinvest') {
     h[field] = !!value;
@@ -4492,7 +4539,20 @@ function renderStandardHoldingForm(h, typeOpts, acOpts, regOpts, riskColor) {
         +'<input class="input" type="number" min="1" max="10" value="'+(h.risk||5)+'" oninput="updateHolding(\''+h.id+'\',\'risk\',this.value)">'
         +'<div class="risk-bar" style="margin-top:3px;"><div class="risk-fill" style="width:'+((h.risk||5)/10*100)+'%;background:'+riskColor+';"></div></div>'
       +'</div>'
-      +'<div class="field"><label>Value ($)</label><input class="input" type="number" value="'+(h.value||0)+'" oninput="updateHolding(\''+h.id+'\',\'value\',this.value)"></div>'
+      +'<div class="field"><label>Value ($)</label>'
+        +'<div style="display:flex;align-items:center;gap:5px;margin-bottom:4px;">'
+          +'<label style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;cursor:pointer;user-select:none;">'
+            +'<input type="checkbox" '+(h.usdValue?'checked':'')+' onchange="var row=this.closest(\'.field\').querySelector(\'.usd-row\');row.style.display=this.checked?\'flex\':\'none\';if(!this.checked){updateHolding(\''+h.id+'\',\'usdValue\',null);}" style="margin:0;width:13px;height:13px;accent-color:var(--teal);">'
+            +'<span>USD</span>'
+          +'</label>'
+          +'<span id="usd-rate-'+h.id+'" style="font-size:8px;color:var(--muted);font-family:IBM Plex Mono,monospace;">'+(USDSGD_FETCHED?'1 USD = '+USDSGD_RATE.toFixed(4)+' SGD':'')+'</span>'
+        +'</div>'
+        +'<div class="usd-row" style="display:'+(h.usdValue?'flex':'none')+';gap:4px;margin-bottom:4px;">'
+          +'<input id="usd-val-'+h.id+'" class="input" type="number" value="'+(h.usdValue||'')+'" placeholder="USD amount" style="flex:1;padding:5px 7px;border-color:#1a56db;background:rgba(26,86,219,0.03);" oninput="convertUSDtoSGD(\''+h.id+'\')">'
+          +'<span style="font-size:9px;color:#1a56db;font-weight:600;padding-top:6px;">USD</span>'
+        +'</div>'
+        +'<input id="sgd-val-'+h.id+'" class="input" type="number" value="'+(h.value||0)+'" oninput="updateHolding(\''+h.id+'\',\'value\',this.value)">'
+      +'</div>'
       +'<div class="field"><label>Cost Basis ($)</label><input class="input" type="number" value="'+(h.cost||0)+'" placeholder="0" oninput="updateHolding(\''+h.id+'\',\'cost\',this.value)"></div>'
     +'</div>'
     +'<div class="form-grid fg-4" style="margin-bottom:0;">'
