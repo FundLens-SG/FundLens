@@ -3733,20 +3733,20 @@ function fetchUSDSGD(cb) {
 // Auto-fetch on load
 try { fetchUSDSGD(); } catch(e) {}
 
-function convertUSDtoSGD(holdingId) {
+function convertUSDtoSGD(holdingId, field) {
   var h = holdings.find(function(x){return x.id===holdingId;});
   if (!h) return;
-  var usdInput = document.querySelector('#usd-val-'+holdingId);
-  var sgdInput = document.querySelector('#sgd-val-'+holdingId);
+  var usdInput = document.querySelector('#usd-'+field+'-'+holdingId);
+  var sgdInput = document.querySelector('#sgd-'+field+'-'+holdingId);
   var rateLabel = document.querySelector('#usd-rate-'+holdingId);
   if (!usdInput) return;
   var usd = parseFloat(usdInput.value) || 0;
   fetchUSDSGD(function(rate) {
     var sgd = Math.round(usd * rate);
-    h.value = sgd;
-    h.usdValue = usd;
+    if (field === 'val') { h.value = sgd; h.usdValue = usd; }
+    else if (field === 'cost') { h.cost = sgd; h.usdCost = usd; }
     if (sgdInput) sgdInput.value = sgd;
-    if (rateLabel) rateLabel.textContent = '1 USD = ' + rate.toFixed(4) + ' SGD' + (USDSGD_FETCHED ? '' : ' (offline rate)');
+    if (rateLabel) rateLabel.textContent = '1 USD = ' + rate.toFixed(4) + ' SGD' + (USDSGD_FETCHED ? '' : ' (offline)');
     refreshAnalysis();
   });
 }
@@ -4203,6 +4203,7 @@ function addHolding() {
     value: 0,
     cost: 0,
     usdValue: null,
+    usdCost: null,
     hist1y: null, hist3y: null, hist5y: null, hist10y: null,
     histAvg: null,
     ter: 0,
@@ -4235,7 +4236,7 @@ function toggleHolding(id) {
 function updateHolding(id, field, value) {
   var h = holdings.find(function(h){ return h.id===id; });
   if (!h) return;
-  if (['value','cost','risk','hist1y','hist3y','hist5y','hist10y','histAvg','ter','premAmt','premYrs','startYear','divPct','usdValue'].indexOf(field)!==-1) {
+  if (['value','cost','risk','hist1y','hist3y','hist5y','hist10y','histAvg','ter','premAmt','premYrs','startYear','divPct','usdValue','usdCost'].indexOf(field)!==-1) {
     h[field] = value === '' ? null : +value;
   } else if (field === 'yieldOverride' || field === 'divReinvest') {
     h[field] = !!value;
@@ -4539,21 +4540,27 @@ function renderStandardHoldingForm(h, typeOpts, acOpts, regOpts, riskColor) {
         +'<input class="input" type="number" min="1" max="10" value="'+(h.risk||5)+'" oninput="updateHolding(\''+h.id+'\',\'risk\',this.value)">'
         +'<div class="risk-bar" style="margin-top:3px;"><div class="risk-fill" style="width:'+((h.risk||5)/10*100)+'%;background:'+riskColor+';"></div></div>'
       +'</div>'
-      +'<div class="field"><label>Value ($)</label>'
-        +'<div style="display:flex;align-items:center;gap:5px;margin-bottom:4px;">'
-          +'<label style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;cursor:pointer;user-select:none;">'
-            +'<input type="checkbox" '+(h.usdValue?'checked':'')+' onchange="var row=this.closest(\'.field\').querySelector(\'.usd-row\');row.style.display=this.checked?\'flex\':\'none\';if(!this.checked){updateHolding(\''+h.id+'\',\'usdValue\',null);}" style="margin:0;width:13px;height:13px;accent-color:var(--teal);">'
-            +'<span>USD</span>'
-          +'</label>'
-          +'<span id="usd-rate-'+h.id+'" style="font-size:8px;color:var(--muted);font-family:IBM Plex Mono,monospace;">'+(USDSGD_FETCHED?'1 USD = '+USDSGD_RATE.toFixed(4)+' SGD':'')+'</span>'
-        +'</div>'
-        +'<div class="usd-row" style="display:'+(h.usdValue?'flex':'none')+';gap:4px;margin-bottom:4px;">'
-          +'<input id="usd-val-'+h.id+'" class="input" type="number" value="'+(h.usdValue||'')+'" placeholder="USD amount" style="flex:1;padding:5px 7px;border-color:#1a56db;background:rgba(26,86,219,0.03);" oninput="convertUSDtoSGD(\''+h.id+'\')">'
+      +'<div style="grid-column:1/-1;display:flex;align-items:center;gap:6px;margin-bottom:2px;">'
+        +'<label style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;cursor:pointer;user-select:none;">'
+          +'<input type="checkbox" id="usd-chk-'+h.id+'" '+(h.usdValue||h.usdCost?'checked':'')+' onchange="var p=this.closest(\'.form-grid\');var rows=p.querySelectorAll(\'.usd-row\');for(var i=0;i<rows.length;i++)rows[i].style.display=this.checked?\'flex\':\'none\';if(!this.checked){updateHolding(\''+h.id+'\',\'usdValue\',null);updateHolding(\''+h.id+'\',\'usdCost\',null);}" style="margin:0;width:13px;height:13px;accent-color:var(--teal);">'
+          +'<span style="font-weight:600;">USD</span>'
+        +'</label>'
+        +'<span id="usd-rate-'+h.id+'" style="font-size:8px;color:var(--muted);font-family:IBM Plex Mono,monospace;">'+(USDSGD_FETCHED?'1 USD = '+USDSGD_RATE.toFixed(4)+' SGD':'')+'</span>'
+      +'</div>'
+      +'<div class="field"><label>Current Value ($)</label>'
+        +'<div class="usd-row" style="display:'+((h.usdValue||h.usdCost)?'flex':'none')+';gap:4px;margin-bottom:4px;">'
+          +'<input id="usd-val-'+h.id+'" class="input" type="number" value="'+(h.usdValue||'')+'" placeholder="USD" style="flex:1;padding:5px 7px;border-color:#1a56db;background:rgba(26,86,219,0.03);" oninput="convertUSDtoSGD(\''+h.id+'\',\'val\')">'
           +'<span style="font-size:9px;color:#1a56db;font-weight:600;padding-top:6px;">USD</span>'
         +'</div>'
         +'<input id="sgd-val-'+h.id+'" class="input" type="number" value="'+(h.value||0)+'" oninput="updateHolding(\''+h.id+'\',\'value\',this.value)">'
       +'</div>'
-      +'<div class="field"><label>Cost Basis ($)</label><input class="input" type="number" value="'+(h.cost||0)+'" placeholder="0" oninput="updateHolding(\''+h.id+'\',\'cost\',this.value)"></div>'
+      +'<div class="field"><label>Starting Value ($)</label>'
+        +'<div class="usd-row" style="display:'+((h.usdValue||h.usdCost)?'flex':'none')+';gap:4px;margin-bottom:4px;">'
+          +'<input id="usd-cost-'+h.id+'" class="input" type="number" value="'+(h.usdCost||'')+'" placeholder="USD" style="flex:1;padding:5px 7px;border-color:#1a56db;background:rgba(26,86,219,0.03);" oninput="convertUSDtoSGD(\''+h.id+'\',\'cost\')">'
+          +'<span style="font-size:9px;color:#1a56db;font-weight:600;padding-top:6px;">USD</span>'
+        +'</div>'
+        +'<input id="sgd-cost-'+h.id+'" class="input" type="number" value="'+(h.cost||0)+'" placeholder="0" oninput="updateHolding(\''+h.id+'\',\'cost\',this.value)">'
+      +'</div>'
     +'</div>'
     +'<div class="form-grid fg-4" style="margin-bottom:0;">'
       +'<div class="field"><label>Est. Return (% p.a.)</label><input class="input" type="number" step="0.1" value="'+(h.histAvg!=null?h.histAvg:'')+'" placeholder="e.g. 8" oninput="updateHolding(\''+h.id+'\',\'histAvg\',this.value)"></div>'
