@@ -3385,15 +3385,18 @@ var FMP_API_KEY = 'dvFHWQOExGtd6PUZXTVm9T4jmyNQPs4G';
 function fetchYahooFallback(holdingId, ticker) {
   var statusEl = document.querySelector('#fmp-status-'+holdingId);
   if (statusEl) statusEl.innerHTML = '<span style="color:var(--teal);">⏳ Trying Yahoo Finance for '+ticker+'...</span>';
-  var url = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=5y&interval=1mo&includePrePost=false';
-  doFetchUrl(url, function(data) {
+  // Use CORS proxy for Yahoo Finance
+  var rawUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=5y&interval=1mo&includePrePost=false';
+  var proxyUrl = 'https://api.allorigins.win/raw?url='+encodeURIComponent(rawUrl);
+  doFetchUrl(proxyUrl, function(data) {
     if (!data || !data.chart || !data.chart.result || !data.chart.result[0]) {
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--coral);">✗ No live data available for '+ticker+'. Risk uses pre-loaded rating.</span>';
+      // All APIs failed — show pre-loaded rating gracefully
+      var h = holdings.find(function(x){return x.id===holdingId;});
+      if (statusEl && h) statusEl.innerHTML = '<span style="color:var(--muted);">Using database risk rating (R'+(h.risk||5)+'). Live metrics require HTTPS hosting.</span>';
       return;
     }
     var meta = data.chart.result[0].meta;
     var prices = data.chart.result[0].indicators.quote[0].close;
-    // Calculate beta and volatility from monthly returns
     var returns = [];
     for (var i=1; i<prices.length; i++) {
       if (prices[i] && prices[i-1] && prices[i-1]>0) {
@@ -3404,21 +3407,20 @@ function fetchYahooFallback(holdingId, ticker) {
     var variance = returns.reduce(function(s,r){return s+Math.pow(r-avgR,2);},0)/(returns.length-1);
     var monthlyVol = Math.sqrt(variance);
     var annualVol = Math.round(monthlyVol * Math.sqrt(12) * 100);
-    // Beta approximation (assume market vol ~16%)
     var estBeta = (annualVol/100)/0.16;
     estBeta = Math.round(estBeta*100)/100;
 
     var h = holdings.find(function(x){return x.id===holdingId;});
     if (!h) return;
-    var mktCap = meta.regularMarketPrice * (meta.regularMarketVolume||1) * 250; // rough estimate
-    var qual = 3; // default for international
+    var mktCap = meta.regularMarketPrice * (meta.regularMarketVolume||1) * 250;
+    var qual = 3;
     h.fmpBeta = estBeta;
-    h.fmpDE = null; // Yahoo chart endpoint doesn't return D/E
+    h.fmpDE = null;
     h.fmpVol = annualVol;
     h.fmpMktCap = mktCap;
     h.fmpQual = qual;
     h.fmpSource = 'Yahoo';
-    h.risk = calcStockRisk(estBeta, annualVol, 1.0, qual); // assume moderate D/E
+    h.risk = calcStockRisk(estBeta, annualVol, 1.0, qual);
 
     renderHoldings();
     refreshAnalysis();
@@ -3431,7 +3433,7 @@ function doFetchUrl(url, cb) {
   try {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', url, true);
-    xhr.timeout = 8000;
+    xhr.timeout = 10000;
     xhr.onload = function() { try { cb(JSON.parse(xhr.responseText)); } catch(e) { cb(null); } };
     xhr.onerror = function() { cb(null); };
     xhr.ontimeout = function() { cb(null); };
@@ -3460,29 +3462,24 @@ function fetchStockMetrics(holdingId) {
 
   var baseUrl = 'https://financialmodelingprep.com/api/v3';
   var key = FMP_API_KEY;
-  var profileUrl = baseUrl+'/profile/'+encodeURIComponent(ticker)+'?apikey='+key;
-  var ratiosUrl = baseUrl+'/ratios-ttm/'+encodeURIComponent(ticker)+'?apikey='+key;
+  var proxy = 'https://api.allorigins.win/raw?url=';
+  var profileRaw = baseUrl+'/profile/'+encodeURIComponent(ticker)+'?apikey='+key;
+  var ratiosRaw = baseUrl+'/ratios-ttm/'+encodeURIComponent(ticker)+'?apikey='+key;
 
-  // Use fetch with timeout, fallback error messages
   var profileData = null, ratiosData = null;
 
-  function doFetch(url, cb) {
-    try {
-      var xhr = new XMLHttpRequest();
-      xhr.open('GET', url, true);
-      xhr.timeout = 8000;
-      xhr.onload = function() {
-        try { cb(JSON.parse(xhr.responseText)); } catch(e) { cb(null); }
-      };
-      xhr.onerror = function() { cb(null); };
-      xhr.ontimeout = function() { cb(null); };
-      xhr.send();
-    } catch(e) { cb(null); }
+  // Try direct first, then CORS proxy
+  function tryFetch(url, cb) {
+    doFetchUrl(url, function(data) {
+      if (data) { cb(data); return; }
+      // Direct failed — try via CORS proxy
+      doFetchUrl(proxy + encodeURIComponent(url), cb);
+    });
   }
 
-  doFetch(profileUrl, function(pData) {
+  tryFetch(profileRaw, function(pData) {
     profileData = pData && pData[0] ? pData[0] : null;
-    doFetch(ratiosUrl, function(rData) {
+    tryFetch(ratiosRaw, function(rData) {
       ratiosData = rData && rData[0] ? rData[0] : null;
 
       if (!profileData) {
@@ -3509,6 +3506,7 @@ function fetchStockMetrics(holdingId) {
       h.fmpVol = estVol;
       h.fmpMktCap = mktCap;
       h.fmpQual = qual;
+      h.fmpSource = 'FMP';
       h.risk = risk;
 
       renderHoldings();
