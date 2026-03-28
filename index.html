@@ -3945,11 +3945,11 @@ function showAddMenu() {
 
 function getScanAPIKey() {
   var key = null;
-  try { key = localStorage.getItem('fundlens_anthropic_key'); } catch(e) {}
+  try { key = localStorage.getItem('fundlens_openai_key'); } catch(e) {}
   if (key) return key;
-  key = prompt('To use document scanning, enter your Anthropic API key.\nGet one free at console.anthropic.com\n\nYour key is stored locally and never sent anywhere except Anthropic.');
+  key = prompt('To use document scanning, enter your OpenAI API key.\nGet one at platform.openai.com/api-keys\n\nYour key is stored locally and never sent anywhere except OpenAI.');
   if (!key) return null;
-  try { localStorage.setItem('fundlens_anthropic_key', key.trim()); } catch(e) {}
+  try { localStorage.setItem('fundlens_openai_key', key.trim()); } catch(e) {}
   return key.trim();
 }
 
@@ -4067,25 +4067,25 @@ function processScan(holdingId, files, apiKey) {
       +'If multiple products are visible in the images, return an array of objects. '
       +'All monetary values must be plain numbers (no $ signs, no commas). Use null for fields not found.';
 
-    // Build content array
+    // Build content array for OpenAI vision
     var content = images.map(function(img) {
-      return {type:'image', source:{type:'base64', media_type:img.mediaType, data:img.base64}};
+      return {type:'image_url', image_url:{url:'data:'+img.mediaType+';base64,'+img.base64, detail:'high'}};
     });
     content.push({type:'text', text:'Extract all financial data from these document image(s). Return ONLY the JSON.'});
 
-    fetch('https://api.anthropic.com/v1/messages', {
+    fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
+        'Authorization': 'Bearer ' + apiKey
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'gpt-4o',
         max_tokens: 4000,
-        system: systemPrompt,
-        messages: [{role:'user', content:content}]
+        messages: [
+          {role:'system', content:systemPrompt},
+          {role:'user', content:content}
+        ]
       })
     })
     .then(function(res) { return res.json(); })
@@ -4098,13 +4098,15 @@ function processScan(holdingId, files, apiKey) {
         renderHoldings();
         alert('API Error: '+(data.error.message||JSON.stringify(data.error)));
         if (data.error.message && data.error.message.indexOf('key')>=0) {
-          try { localStorage.removeItem('fundlens_anthropic_key'); } catch(e) {}
+          try { localStorage.removeItem('fundlens_openai_key'); } catch(e) {}
         }
         return;
       }
 
       var text = '';
-      if (data.content) data.content.forEach(function(c){ if(c.type==='text') text+=c.text; });
+      if (data.choices && data.choices[0] && data.choices[0].message) {
+        text = data.choices[0].message.content || '';
+      }
       text = text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
 
       try {
