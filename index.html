@@ -212,6 +212,7 @@ body {
 .fg-3 { grid-template-columns: 1fr 1fr 1fr; }
 .fg-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
 .fg-5 { grid-template-columns: 1fr 1fr 1fr 1fr 1fr; }
+.fg-5 { grid-template-columns: 1fr 1fr 1fr 1fr 1fr; }
 .fg-6 { grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr; }
 
 /* ── TABLE ── */
@@ -4419,8 +4420,11 @@ function applyFundData(holdingId, valid, ticker) {
       }
     }
     _doAutoSave();
-    renderHoldings(); // refresh to show note
+    safeRender(renderHoldings); // always re-render to show populated fields
   });
+  // Also re-render immediately so histAvg shows before dividend fetch completes
+  _doAutoSave();
+  safeRender(renderHoldings);
 }
 
 // ── Sub-fund fetch helpers ──
@@ -5346,8 +5350,8 @@ function renderStandardHoldingForm(h, typeOpts, acOpts, regOpts, riskColor) {
         +'<input id="sgd-cost-'+h.id+'" class="input" type="number" value="'+(h.cost||0)+'" placeholder="0" oninput="updateHolding(\''+h.id+'\',\'cost\',this.value)">'
       +'</div>'
     +'</div>'
-    +'<div class="form-grid fg-4" style="margin-bottom:0;">'
-      +'<div class="field"><label>Est. Return (% p.a.)</label><input class="input" type="number" step="0.1" value="'+(h.histAvg!=null?h.histAvg:'')+'" placeholder="e.g. 8" oninput="updateHolding(\''+h.id+'\',\'histAvg\',this.value)">'
+    +'<div class="form-grid fg-5" style="margin-bottom:0;">'
+      +'<div class="field"><label>Est. Return % <span style="font-size:7.5px;color:var(--muted);">(div reinvested)</span></label><input class="input" type="number" step="0.1" value="'+(h.histAvg!=null?h.histAvg:'')+'" placeholder="e.g. 8" oninput="updateHolding(\''+h.id+'\',\'histAvg\',this.value)">'
         +'<div id="ayield-'+h.id+'" style="font-size:10px;margin-top:3px;font-weight:600;font-family:IBM Plex Mono,monospace;'+(function(){
           var ay = calcActualYield(h);
           if (ay !== null) {
@@ -5355,6 +5359,10 @@ function renderStandardHoldingForm(h, typeOpts, acOpts, regOpts, riskColor) {
           }
           return 'display:none;">';
         })()+'</div>'
+      +'</div>'
+      +'<div class="field"><label>Div / Yield % <span style="font-size:7.5px;color:var(--muted);">p.a.</span></label>'
+        +'<input class="input" type="number" step="0.1" value="'+(h.divPct!=null?h.divPct:'')+'" placeholder="e.g. 4" oninput="updateHolding(\''+h.id+'\',\'divPct\',this.value)">'
+        +'<div style="font-size:8px;color:var(--muted);margin-top:2px;">Part of est. return</div>'
       +'</div>'
       +'<div class="field"><label>Add. Fees (% p.a.)</label><input class="input" type="number" step="0.01" value="'+(h.ter||'')+'" placeholder="e.g. 0.5" oninput="updateHolding(\''+h.id+'\',\'ter\',this.value)"></div>'
       +'<div class="field"><label>Invest Start</label><input class="input" type="month" value="'+escHtml(h.startDate||'')+'" style="color:var(--ink);font-size:12px;" oninput="updateHolding(\''+h.id+'\',\'startDate\',this.value)"></div>'
