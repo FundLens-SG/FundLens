@@ -4405,24 +4405,21 @@ function applyFundData(holdingId, valid, ticker) {
   if (retData.sinceInception != null) h.histAvg = retData.sinceInception;
   if (!h.incepDate) h.incepDate = retData.incepStr;
 
-  // Display
-  if (statusEl) {
-    statusEl.innerHTML = formatReturnDisplay(retData, ticker);
-  }
+  // Display + store on holding for re-render persistence
+  var statusHtml = formatReturnDisplay(retData, ticker);
+  h._fetchStatus = statusHtml;
+  if (statusEl) statusEl.innerHTML = statusHtml;
 
   // Also fetch dividend yield from Yahoo quoteSummary
   fetchDividendYield(ticker, function(divYield) {
     if (divYield != null && divYield > 0) {
-      h.divPct = Math.round(divYield * 1000) / 10; // e.g. 0.0441 → 4.4
-      if (statusEl) {
-        var existing = statusEl.innerHTML;
-        statusEl.innerHTML = existing.replace('</span><br>', ' · <span style="color:#c8820a;font-weight:600;">Div: '+h.divPct.toFixed(1)+'% p.a.</span></span><br>');
-      }
+      h.divPct = Math.round(divYield * 1000) / 10;
+      h._fetchStatus = statusHtml.replace('</span><br>', ' · <span style="color:#c8820a;font-weight:600;">Div: '+h.divPct.toFixed(1)+'% p.a.</span></span><br>');
     }
     _doAutoSave();
-    safeRender(renderHoldings); // always re-render to show populated fields
+    safeRender(renderHoldings);
   });
-  // Also re-render immediately so histAvg shows before dividend fetch completes
+  // Re-render immediately so histAvg shows before dividend fetch completes
   _doAutoSave();
   safeRender(renderHoldings);
 }
@@ -5314,7 +5311,7 @@ function renderStandardHoldingForm(h, typeOpts, acOpts, regOpts, riskColor) {
       +'<input class="input" value="'+escHtml(h.name)+'" placeholder="'+searchPH+'" style="font-size:13px;font-weight:600;padding:8px 10px;border:2px solid var(--teal);border-radius:6px;" onfocus="if(this.value===\'New Holding\'){this.value=\'\';updateHolding(\''+h.id+'\',\'name\',\'\');}" oninput="updateHolding(\''+h.id+'\',\'name\',this.value);showFundAutocomplete(this,function(r){updateHolding(\''+h.id+'\',\'name\',r.name);updateHolding(\''+h.id+'\',\'assetClass\',r.ac);updateHolding(\''+h.id+'\',\'region\',r.region);updateHolding(\''+h.id+'\',\'sector\',r.sector);updateHolding(\''+h.id+'\',\'risk\',r.risk);if(r.incep)updateHolding(\''+h.id+'\',\'incepDate\',r.incep);if(r.isin)updateHolding(\''+h.id+'\',\'isin\',r.isin);renderHoldings();refreshAnalysis();if(TICKER_MAP[r.name])setTimeout(function(){fetchStockMetrics(\''+h.id+'\');},300);if(FUND_TICKER[r.name])setTimeout(function(){fetchFundReturns(\''+h.id+'\');},300);},\''+h.type+'\');">'
       +(h.incepDate||h.isin ? '<div style="font-size:9px;color:var(--muted);margin-top:3px;font-style:italic;">'+(h.incepDate?'Fund inception: '+escHtml(h.incepDate):'')+(h.incepDate&&h.isin?' · ':'')+(h.isin?'ISIN: '+escHtml(h.isin):'')+'</div>' : '')
       +'<div id="fund-status-'+h.id+'" style="font-size:10px;margin-top:4px;line-height:1.5;">'
-        +(FUND_TICKER[h.name] ? '<span style="color:var(--muted);font-size:9px;">📡 Live returns available · <a href="#" onclick="fetchFundReturns(\''+h.id+'\');return false;" style="color:var(--teal);text-decoration:underline;">Refresh</a></span>' : '')
+        +(h._fetchStatus ? h._fetchStatus : (FUND_TICKER[h.name] ? '<span style="color:var(--muted);font-size:9px;">📡 Live returns available · <a href="#" onclick="fetchFundReturns(\''+h.id+'\');return false;" style="color:var(--teal);text-decoration:underline;">Refresh</a></span>' : ''))
       +'</div>'
     +'</div>'
     +'<div class="form-grid fg-3" style="margin-bottom:10px;">'
@@ -5351,7 +5348,7 @@ function renderStandardHoldingForm(h, typeOpts, acOpts, regOpts, riskColor) {
       +'</div>'
     +'</div>'
     +'<div class="form-grid fg-5" style="margin-bottom:0;">'
-      +'<div class="field"><label>Est. Return % <span style="font-size:7.5px;color:var(--muted);">(div reinvested)</span></label><input class="input" type="number" step="0.1" value="'+(h.histAvg!=null?h.histAvg:'')+'" placeholder="e.g. 8" oninput="updateHolding(\''+h.id+'\',\'histAvg\',this.value)">'
+      +'<div class="field"><label>Est. Return % '+(h.type==='stock'||h.type==='bond'?'<span style="font-size:7.5px;color:var(--muted);">p.a.</span>':'<span style="font-size:7.5px;color:var(--muted);">(div reinvested)</span>')+'</label><input class="input" type="number" step="0.1" value="'+(h.histAvg!=null?h.histAvg:'')+'" placeholder="e.g. 8" oninput="updateHolding(\''+h.id+'\',\'histAvg\',this.value)">'
         +'<div id="ayield-'+h.id+'" style="font-size:10px;margin-top:3px;font-weight:600;font-family:IBM Plex Mono,monospace;'+(function(){
           var ay = calcActualYield(h);
           if (ay !== null) {
@@ -5541,10 +5538,14 @@ function renderILPHoldingForm(h, typeOpts) {
             +'<input class="input" type="number" step="0.01" value="'+(f.ter!=null?f.ter:'')+'" placeholder="—" style="padding:5px 7px;" oninput="updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'ter\',this.value)">'
           +'</div>'
         +'</div>'
-        // Row 3: estimated return
+        // Row 3: estimated return + dividend
         +'<div class="form-grid fg-4" style="gap:6px;">'
-          +'<div class="field"><label style="font-size:9.5px;">Est. Yield (% p.a.)</label>'
+          +'<div class="field"><label style="font-size:9.5px;">Est. Return % <span style="font-size:7px;color:var(--muted);">(div reinvested)</span></label>'
             +'<input class="input" type="number" step="0.1" value="'+(f.histAvg!=null?f.histAvg:'')+'" placeholder="e.g. 7" style="padding:5px 7px;" oninput="updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'histAvg\',this.value)">'
+          +'</div>'
+          +'<div class="field"><label style="font-size:9.5px;">Div % <span style="font-size:7px;color:var(--muted);">p.a.</span></label>'
+            +'<input class="input" type="number" step="0.1" value="'+(f.divPct!=null?f.divPct:'')+'" placeholder="e.g. 3" style="padding:5px 7px;" oninput="updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'divPct\',this.value)">'
+            +'<div style="font-size:7.5px;color:var(--muted);margin-top:1px;">Part of est. return</div>'
           +'</div>'
         +'</div>'
       +'</div>';
@@ -6650,7 +6651,7 @@ function renderStrategyPage() {
                           +'</div>'
                         +'</div>'
                         +'<div class="form-grid fg-3" style="gap:6px;">'
-                          +'<div class="field"><label style="font-size:9.5px;">Est. Yield (% p.a.)</label>'
+                          +'<div class="field"><label style="font-size:9.5px;">Est. Return % <span style="font-size:7px;color:var(--muted);">(div reinvested)</span></label>'
                             +'<input class="input" type="number" step="0.1" value="'+(f.histAvg!=null?f.histAvg:'')+'" placeholder="e.g. 7" style="padding:5px 7px;" oninput="updateILPFund(\''+p.id+'\',\''+f.id+'\',\'histAvg\',this.value)">'
                           +'</div>'
                           +'<div class="field"><label style="font-size:9.5px;">Risk (1–10)</label>'
@@ -7489,9 +7490,11 @@ function saveFile() {
   });
   if (disc) disc.style.display = discDisplay;
 
-  // Stamp holdings + clientInfo into the STATE markers
+  // Stamp holdings + clientInfo into the STATE markers (strip transient data)
+  var saveHoldings = JSON.parse(JSON.stringify(holdings));
+  saveHoldings.forEach(function(h){delete h._fetchStatus;});
   var stateBlock = '/*__FUNDLENS_STATE_START__*/\n'
-    +'var holdings = '+safeJSON(holdings)+';\n'
+    +'var holdings = '+safeJSON(saveHoldings)+';\n'
     +'var clientInfo = '+safeJSON(clientInfo)+';\n'
     +'/*__FUNDLENS_STATE_END__*/';
   html = html.replace(/\/\*__FUNDLENS_STATE_START__\*\/[\s\S]*?\/\*__FUNDLENS_STATE_END__\*\//, stateBlock);
