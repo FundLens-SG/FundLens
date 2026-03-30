@@ -3807,6 +3807,56 @@ var TICKER_MAP = {
   'Ascott Residence Trust':'HMN.SI',
 };
 
+// ══════ FUND TICKER MAP — Multi-candidate Yahoo Finance / Morningstar IDs ══════
+// Each fund maps to an array of tickers across exchanges (SG, London, Frankfurt, etc.)
+// The fetch engine tries ALL candidates and keeps the one with the LONGEST price history.
+// This captures parent fund track records even when the SG share class is newer.
+var FUND_TICKER = {
+  // ── AIA ILP Sub-Funds ──
+  'AIA Acorns of Asia Fund':['0P00008SWX.SI'],
+  'AIA Regional Fixed Income Fund':['0P00008T6N.SI'],
+  'AIA Regional Equity Fund':['0P00008T6M.SI'],
+  'AIA Global Equity Fund':['0P00008T6C.SI'],
+  'AIA Global Bond Fund':['0P00008T6B.SI'],
+  'AIA Asian Bond Fund':['0P00008T6A.SI'],
+  'AIA Greater China Equity Fund':['0P00008T6F.SI'],
+  'AIA Global Technology Fund':['0P00008T6D.SI'],
+  'AIA International Healthcare Fund':['0P00008T6H.SI'],
+  'AIA Emerging Markets Equity Fund':['0P00008T6I.SI'],
+  'AIA Singapore Equity Fund':['0P00008T6L.SI'],
+  'AIA Global Dynamic Income Fund':['0P0001KL95.SI'],
+  'AIA India Equity Fund':['0P00008SZB.SI'],
+  // ── PRULink ILP Sub-Funds ──
+  'PRULink Asian Equity Fund':['F0HKG07089.SI'],
+  'PRULink Global Equity Fund':['F0HKG0708E.SI'],
+  'PRULink Singapore Growth Fund':['PRULINKSINGA.SI'],
+  'PRULink Greater China Fund':['PRULINKGREAT.SI'],
+  'PRULink Global Bond Fund':['PRULINKGLOBA.SI'],
+  'PRULink Emerging Markets Fund':['F0HKG070B0.SI'],
+  'PRULink Global Dividend Wealth Fund':['0P0001Q05I.SI'],
+  'PRULink India Equity Fund':['0P0001IZQD.SI'],
+  'PRULink Global Technology Fund':['0P0001IZQB.SI'],
+  'PRULink Global Healthcare Fund':['0P0001IZQA.SI'],
+  'PRULink Short Duration Bond Fund':['0P0001IZQC.SI'],
+  'PRULink Asian Bond Fund':['F0HKG0708A.SI'],
+  // ── Popular SG Unit Trusts — multi-candidate for longest history ──
+  'Schroder ISF Asian Equity Yield':['SG9999004186.SI','0P0000SCQS.L'],
+  'Schroder Singapore Trust':['SG9999003545.SI'],
+  'LionGlobal All Seasons Fund':['SG9999002406.SI'],
+  'Nikko AM Shenton Income Fund':['SG9999003958.SI'],
+  'Fullerton SGD Income Fund':['SG9999013530.SI'],
+  'Fullerton Short Term Interest Rate Fund':['SG9999003289.SI'],
+  'Eastspring Investments Unit Trusts - Asian Equity Fund':['SG9999001606.SI'],
+  'JPMorgan Global Income Fund':['SG9999011088.SI','0P00009YJ1.L'],
+  'Fidelity Global Dividend Fund':['SG9999014405.SI','0P00012CV1.L'],
+  'Fidelity Global Technology Fund':['0P00012CU7.L','0P0001DIJX.SI','SG9999014538.SI'],
+  'Dimensional Global Core Equity':['0P0001AF7U.SI','0P0001G15W.SI'],
+  'United SGD Fund':['SG9999001648.SI'],
+  'Nikko AM STI ETF':['ES3.SI'],
+  'PIMCO GIS Income Fund':['0P0000Y077.SI','0P00012D3I.L'],
+  'Blackrock World Gold':['0P0000XQJW.L','0P0000050S.L'],
+};
+
 var FMP_API_KEY = 'dvFHWQOExGtd6PUZXTVm9T4jmyNQPs4G';
 var FINNHUB_KEY = 'd73mejhr01qjjol3i5l0d73mejhr01qjjol3i5lg'; // Get free key at finnhub.io/register (60 calls/min, native CORS)
 
@@ -4279,6 +4329,248 @@ function applyScanData(holdingId, data) {
     if (notes.length) h.notes = (h.notes ? h.notes+' · ' : '') + notes.join(' · ');
     h._open = true;
   }
+}
+
+// ══════ FUND RETURNS FETCH — Multi-candidate, longest history wins ══════
+function fetchFundReturns(holdingId) {
+  var h = holdings.find(function(x){return x.id===holdingId;});
+  if (!h) return;
+  var candidates = FUND_TICKER[h.name];
+  if (!candidates || !candidates.length) return;
+
+  var statusEl = document.getElementById('fund-status-'+holdingId);
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--teal);">⏳ Fetching from '+candidates.length+' source'+(candidates.length>1?'s':'')+'...</span>';
+
+  // Fetch all candidates in parallel, pick longest history
+  var results = [];
+  var done = 0;
+
+  candidates.forEach(function(ticker, idx) {
+    var url = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=max&interval=1mo';
+    // Try primary proxy, fall back to secondary
+    function tryFetch(proxyIdx) {
+      if (proxyIdx >= CORS_PROXIES.length) { checkDone(); return; }
+      fetch(CORS_PROXIES[proxyIdx] + encodeURIComponent(url))
+        .then(function(r){return r.json();})
+        .then(function(data) {
+          try {
+            var result = data.chart ? data.chart.result[0] : null;
+            if (!result || !result.indicators) throw new Error('No data');
+            var closes = result.indicators.adjclose ? result.indicators.adjclose[0].adjclose : result.indicators.quote[0].close;
+            var timestamps = result.timestamp;
+            if (!closes || !timestamps || closes.length < 2) throw new Error('Insufficient');
+
+            var valid = [];
+            for (var i = 0; i < closes.length; i++) {
+              if (closes[i] != null && timestamps[i] != null) valid.push({t:timestamps[i]*1000, p:closes[i]});
+            }
+            if (valid.length >= 2) {
+              results.push({ticker:ticker, data:valid, firstTs:valid[0].t});
+            }
+          } catch(e) {}
+          checkDone();
+        })
+        .catch(function() { tryFetch(proxyIdx+1); });
+    }
+    tryFetch(0);
+  });
+
+  function checkDone() {
+    done++;
+    if (done < candidates.length) return;
+    if (!results.length) {
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted);">No data available — enter returns manually</span>';
+      return;
+    }
+
+    // Pick candidate with longest history (earliest first timestamp)
+    results.sort(function(a,b){return a.firstTs - b.firstTs;});
+    var best = results[0];
+    applyFundData(holdingId, best.data, best.ticker);
+  }
+}
+
+function applyFundData(holdingId, valid, ticker) {
+  var h = holdings.find(function(x){return x.id===holdingId;});
+  if (!h) return;
+  var statusEl = document.getElementById('fund-status-'+holdingId);
+  var retData = calcReturnsFromPrices(valid);
+
+  // Store on holding
+  if (retData.ret1y != null) h.hist1y = retData.ret1y;
+  if (retData.ret3y != null) h.hist3y = retData.ret3y;
+  if (retData.ret5y != null) h.hist5y = retData.ret5y;
+  if (retData.ret10y != null) h.hist10y = retData.ret10y;
+  if (retData.sinceInception != null) h.histAvg = retData.sinceInception;
+  if (!h.incepDate) h.incepDate = retData.incepStr;
+
+  // Display
+  if (statusEl) {
+    statusEl.innerHTML = formatReturnDisplay(retData, ticker);
+  }
+
+  // Also fetch dividend yield from Yahoo quoteSummary
+  fetchDividendYield(ticker, function(divYield) {
+    if (divYield != null && divYield > 0) {
+      h.divPct = Math.round(divYield * 1000) / 10; // e.g. 0.0441 → 4.4
+      if (statusEl) {
+        var existing = statusEl.innerHTML;
+        statusEl.innerHTML = existing.replace('</span><br>', ' · <span style="color:#c8820a;font-weight:600;">Div: '+h.divPct.toFixed(1)+'% p.a.</span></span><br>');
+      }
+    }
+    _doAutoSave();
+    renderHoldings(); // refresh to show note
+  });
+}
+
+// ── Sub-fund fetch helpers ──
+function fetchFundReturnsForSub(holdingId, fundId, fundName) {
+  var candidates = FUND_TICKER[fundName];
+  if (!candidates || !candidates.length) return;
+  var results = []; var done = 0;
+  candidates.forEach(function(ticker) {
+    var url = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=max&interval=1mo';
+    fetch(CORS_PROXIES[0]+encodeURIComponent(url)).then(function(r){return r.json();}).then(function(data) {
+      try {
+        var result = data.chart.result[0];
+        var closes = result.indicators.adjclose ? result.indicators.adjclose[0].adjclose : result.indicators.quote[0].close;
+        var timestamps = result.timestamp;
+        var valid = [];
+        for (var i=0;i<closes.length;i++) if(closes[i]!=null&&timestamps[i]!=null) valid.push({t:timestamps[i]*1000,p:closes[i]});
+        if (valid.length>=2) results.push({ticker:ticker,data:valid,firstTs:valid[0].t});
+      } catch(e) {}
+      if(++done>=candidates.length) applySubFundData(holdingId,fundId,results);
+    }).catch(function(){if(++done>=candidates.length) applySubFundData(holdingId,fundId,results);});
+  });
+}
+
+function applySubFundData(holdingId, fundId, results) {
+  if (!results.length) return;
+  results.sort(function(a,b){return a.firstTs-b.firstTs;});
+  var best = results[0];
+  var retData = calcReturnsFromPrices(best.data);
+  var h = holdings.find(function(x){return x.id===holdingId;});
+  if (!h || !h.ilpFunds) return;
+  var f = h.ilpFunds.find(function(x){return x.id===fundId;});
+  if (!f) return;
+  if (retData.sinceInception != null) f.histAvg = retData.sinceInception;
+  if (retData.ret5y != null) f.hist5y = retData.ret5y;
+  if (retData.ret3y != null) f.hist3y = retData.ret3y;
+  if (retData.ret1y != null) f.hist1y = retData.ret1y;
+  _doAutoSave();
+}
+
+function fetchFundReturnsForStratSub(prodId, fundId, fundName) {
+  var candidates = FUND_TICKER[fundName];
+  if (!candidates || !candidates.length) return;
+  var results = []; var done = 0;
+  candidates.forEach(function(ticker) {
+    var url = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=max&interval=1mo';
+    fetch(CORS_PROXIES[0]+encodeURIComponent(url)).then(function(r){return r.json();}).then(function(data) {
+      try {
+        var result = data.chart.result[0];
+        var closes = result.indicators.adjclose ? result.indicators.adjclose[0].adjclose : result.indicators.quote[0].close;
+        var timestamps = result.timestamp;
+        var valid = [];
+        for (var i=0;i<closes.length;i++) if(closes[i]!=null&&timestamps[i]!=null) valid.push({t:timestamps[i]*1000,p:closes[i]});
+        if (valid.length>=2) results.push({data:valid,firstTs:valid[0].t});
+      } catch(e) {}
+      if (++done >= candidates.length && results.length) {
+        results.sort(function(a,b){return a.firstTs-b.firstTs;});
+        var retData = calcReturnsFromPrices(results[0].data);
+        var p = stratProducts.find(function(x){return x.id===prodId;});
+        if (p && p.ilpFunds) {
+          var f = p.ilpFunds.find(function(x){return x.id===fundId;});
+          if (f && retData.sinceInception != null) f.histAvg = retData.sinceInception;
+        }
+      }
+    }).catch(function(){done++;});
+  });
+}
+
+// ── Shared return calculation from price array ──
+function calcReturnsFromPrices(valid) {
+  var now = valid[valid.length-1];
+  var first = valid[0];
+  var nowDate = new Date(now.t);
+  var totalYears = (now.t - first.t)/(365.25*24*3600000);
+
+  function findPrice(monthsAgo) {
+    var target = new Date(nowDate); target.setMonth(target.getMonth()-monthsAgo);
+    var targetTs = target.getTime();
+    var best = null, bestDist = Infinity;
+    for (var i = 0; i < valid.length; i++) {
+      var dist = Math.abs(valid[i].t - targetTs);
+      if (dist < bestDist) { bestDist = dist; best = valid[i]; }
+    }
+    return (best && bestDist < 60*86400000) ? best.p : null;
+  }
+  function cagr(start, end, years) {
+    if (!start || !end || start <= 0 || years <= 0.08) return null;
+    return Math.round((Math.pow(end/start, 1/years) - 1) * 1000) / 10;
+  }
+
+  var periods = [
+    {label:'1Y',months:12,ann:false},{label:'3Y',months:36,ann:true,yrs:3},
+    {label:'5Y',months:60,ann:true,yrs:5},{label:'10Y',months:120,ann:true,yrs:10},
+    {label:'15Y',months:180,ann:true,yrs:15},{label:'20Y',months:240,ann:true,yrs:20},
+    {label:'25Y',months:300,ann:true,yrs:25}
+  ];
+  var returns = {};
+  periods.forEach(function(p) {
+    if (totalYears * 12 < p.months - 1) return;
+    var px = findPrice(p.months);
+    if (!px) return;
+    returns[p.label] = p.ann ? cagr(px, now.p, p.yrs) : Math.round((now.p/px - 1) * 1000) / 10;
+  });
+
+  var sinceInception = cagr(first.p, now.p, totalYears);
+  var incDate = new Date(first.t);
+  var incStr = incDate.toLocaleDateString('en-GB',{month:'short',year:'numeric'});
+
+  return {
+    returns: returns,
+    ret1y: returns['1Y']!=null?returns['1Y']:null,
+    ret3y: returns['3Y']!=null?returns['3Y']:null,
+    ret5y: returns['5Y']!=null?returns['5Y']:null,
+    ret10y: returns['10Y']!=null?returns['10Y']:null,
+    sinceInception: sinceInception,
+    incepStr: incStr,
+    totalYears: totalYears,
+    dataPoints: valid.length
+  };
+}
+
+function formatReturnDisplay(retData, ticker) {
+  var parts = [];
+  ['1Y','3Y','5Y','10Y','15Y','20Y','25Y'].forEach(function(k) {
+    var v = retData.returns[k];
+    if (v != null) {
+      var col = v >= 0 ? 'var(--teal)' : 'var(--coral)';
+      parts.push('<span style="color:'+col+';">'+k+': '+(v>=0?'+':'')+v.toFixed(1)+'%</span>');
+    }
+  });
+  if (retData.sinceInception != null) {
+    var col = retData.sinceInception >= 0 ? 'var(--teal)' : 'var(--coral)';
+    parts.push('<span style="font-weight:700;color:'+col+';">Since '+retData.incepStr+': '+(retData.sinceInception>=0?'+':'')+retData.sinceInception.toFixed(1)+'% p.a.</span>');
+  }
+  return '📡 ' + parts.join(' · ')
+    + '</span><br><span style="color:var(--muted);font-size:9px;">Source: Yahoo Finance ('+ticker+') · '
+    + Math.round(retData.totalYears)+'yr history · '+retData.dataPoints+' pts</span>'
+    + '<br><span style="color:#b8860b;font-size:9px;font-style:italic;">ℹ Returns include reinvested dividends. Adjust Est. Return and Div % separately if dividends are paid out.</span>';
+}
+
+// ── Dividend yield fetch from Yahoo quoteSummary ──
+function fetchDividendYield(ticker, callback) {
+  var url = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/'+encodeURIComponent(ticker)+'?modules=summaryDetail';
+  fetch(CORS_PROXIES[0]+encodeURIComponent(url)).then(function(r){return r.json();}).then(function(data) {
+    try {
+      var sd = data.quoteSummary.result[0].summaryDetail;
+      var divYield = sd.trailingAnnualDividendYield ? sd.trailingAnnualDividendYield.raw : null;
+      if (!divYield && sd.yield) divYield = sd.yield.raw;
+      callback(divYield);
+    } catch(e) { callback(null); }
+  }).catch(function() { callback(null); });
 }
 
 function fetchStockMetrics(holdingId) {
@@ -4932,7 +5224,7 @@ function renderHoldings() {
           +(h.value>0?'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:11.5px;font-weight:600;color:'+(isILP?'var(--purple)':'var(--teal)')+';">'+fmtSGD(h.value)+'</span>':'')
           +'<button onclick="toggleHolding(\''+h.id+'\')" style="background:rgba(0,0,0,0.06);border:none;border-radius:5px;padding:5px 9px;font-size:11px;cursor:pointer;color:var(--muted);font-weight:600;white-space:nowrap;min-height:32px;flex-shrink:0;">'+(open?'▲':'✏')+'</button>'
           +'<button onclick="scanHolding(\''+h.id+'\')" style="background:rgba(109,63,160,0.08);border:none;border-radius:5px;padding:5px 8px;color:#6d3fa0;cursor:pointer;font-size:11px;font-weight:600;min-height:32px;flex-shrink:0;" title="Scan document / photo">📷</button>'
-          +'<button onclick="window.open(\'https://www.google.com/search?q=\'+encodeURIComponent(\''+escHtml(h.name)+' SGD fund factsheet\'),\'_blank\')" style="background:rgba(26,86,219,0.08);border:none;border-radius:5px;padding:5px 8px;color:#1a56db;cursor:pointer;font-size:11px;font-weight:600;min-height:32px;flex-shrink:0;" title="Search factsheet on Google">📄</button>'
+          +(!isILP ? '<button onclick="window.open(\'https://www.google.com/search?q=\'+encodeURIComponent(\''+escHtml(h.name)+' SGD fund factsheet\'),\'_blank\')" style="background:rgba(26,86,219,0.08);border:none;border-radius:5px;padding:5px 8px;color:#1a56db;cursor:pointer;font-size:11px;font-weight:600;min-height:32px;flex-shrink:0;" title="Search factsheet on Google">📄</button>' : '')
           +'<button onclick="removeHolding(\''+h.id+'\')" style="background:var(--coral-light);border:none;border-radius:5px;padding:5px 8px;color:var(--coral);cursor:pointer;font-size:13px;font-weight:700;min-height:32px;flex-shrink:0;">✕</button>'
         +'</div>'
       +'</div>'
@@ -5015,8 +5307,11 @@ function renderStandardHoldingForm(h, typeOpts, acOpts, regOpts, riskColor) {
   return '<div style="border-top:1px solid var(--border);padding-top:11px;">'
     +'<div class="field" style="margin-bottom:10px;position:relative;">'
       +'<label style="font-size:10px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:0.5px;">'+searchLabel+'</label>'
-      +'<input class="input" value="'+escHtml(h.name)+'" placeholder="'+searchPH+'" style="font-size:13px;font-weight:600;padding:8px 10px;border:2px solid var(--teal);border-radius:6px;" onfocus="if(this.value===\'New Holding\'){this.value=\'\';updateHolding(\''+h.id+'\',\'name\',\'\');}" oninput="updateHolding(\''+h.id+'\',\'name\',this.value);showFundAutocomplete(this,function(r){updateHolding(\''+h.id+'\',\'name\',r.name);updateHolding(\''+h.id+'\',\'assetClass\',r.ac);updateHolding(\''+h.id+'\',\'region\',r.region);updateHolding(\''+h.id+'\',\'sector\',r.sector);updateHolding(\''+h.id+'\',\'risk\',r.risk);if(r.incep)updateHolding(\''+h.id+'\',\'incepDate\',r.incep);if(r.isin)updateHolding(\''+h.id+'\',\'isin\',r.isin);renderHoldings();refreshAnalysis();if(TICKER_MAP[r.name])setTimeout(function(){fetchStockMetrics(\''+h.id+'\');},300);},\''+h.type+'\');">'
+      +'<input class="input" value="'+escHtml(h.name)+'" placeholder="'+searchPH+'" style="font-size:13px;font-weight:600;padding:8px 10px;border:2px solid var(--teal);border-radius:6px;" onfocus="if(this.value===\'New Holding\'){this.value=\'\';updateHolding(\''+h.id+'\',\'name\',\'\');}" oninput="updateHolding(\''+h.id+'\',\'name\',this.value);showFundAutocomplete(this,function(r){updateHolding(\''+h.id+'\',\'name\',r.name);updateHolding(\''+h.id+'\',\'assetClass\',r.ac);updateHolding(\''+h.id+'\',\'region\',r.region);updateHolding(\''+h.id+'\',\'sector\',r.sector);updateHolding(\''+h.id+'\',\'risk\',r.risk);if(r.incep)updateHolding(\''+h.id+'\',\'incepDate\',r.incep);if(r.isin)updateHolding(\''+h.id+'\',\'isin\',r.isin);renderHoldings();refreshAnalysis();if(TICKER_MAP[r.name])setTimeout(function(){fetchStockMetrics(\''+h.id+'\');},300);if(FUND_TICKER[r.name])setTimeout(function(){fetchFundReturns(\''+h.id+'\');},300);},\''+h.type+'\');">'
       +(h.incepDate||h.isin ? '<div style="font-size:9px;color:var(--muted);margin-top:3px;font-style:italic;">'+(h.incepDate?'Fund inception: '+escHtml(h.incepDate):'')+(h.incepDate&&h.isin?' · ':'')+(h.isin?'ISIN: '+escHtml(h.isin):'')+'</div>' : '')
+      +'<div id="fund-status-'+h.id+'" style="font-size:10px;margin-top:4px;line-height:1.5;">'
+        +(FUND_TICKER[h.name] ? '<span style="color:var(--muted);font-size:9px;">📡 Live returns available · <a href="#" onclick="fetchFundReturns(\''+h.id+'\');return false;" style="color:var(--teal);text-decoration:underline;">Refresh</a></span>' : '')
+      +'</div>'
     +'</div>'
     +'<div class="form-grid fg-3" style="margin-bottom:10px;">'
       +'<div class="field"><label>Type</label><select class="input" onchange="updateHolding(\''+h.id+'\',\'type\',this.value)">'+typeOpts+'</select></div>'
@@ -5202,10 +5497,11 @@ function renderILPHoldingForm(h, typeOpts) {
         +'<div style="display:flex;align-items:center;gap:7px;margin-bottom:7px;">'
           +'<div class="field" style="flex:1;min-width:0;margin-bottom:0;">'
             +'<label style="font-size:9px;color:var(--purple);font-weight:600;">FUND NAME</label>'
-            +'<input class="input" value="'+escHtml(f.name||'')+'" placeholder="e.g. Aberdeen Global Equity" style="padding:5px 7px;font-weight:600;" oninput="updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'name\',this.value);showFundAutocomplete(this,function(r){updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'name\',r.name);updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'assetClass\',r.ac);updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'region\',r.region);updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'sector\',r.sector);updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'risk\',r.risk);renderHoldings();refreshAnalysis();},\'ut\');">'
+            +'<input class="input" value="'+escHtml(f.name||'')+'" placeholder="e.g. Aberdeen Global Equity" style="padding:5px 7px;font-weight:600;" oninput="updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'name\',this.value);showFundAutocomplete(this,function(r){updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'name\',r.name);updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'assetClass\',r.ac);updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'region\',r.region);updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'sector\',r.sector);updateHoldingFund(\''+h.id+'\',\''+f.id+'\',\'risk\',r.risk);renderHoldings();refreshAnalysis();if(FUND_TICKER[r.name])fetchFundReturnsForSub(\''+h.id+'\',\''+f.id+'\',r.name);},\'ut\');">'
           +'</div>'
           +(fVal!==null?'<span style="font-size:11px;color:var(--purple);font-weight:600;white-space:nowrap;padding-top:14px;">'+fmtSGD(fVal)+'</span>':'')
-          +(br!==null?'<span style="font-size:11px;color:'+(br>=0?'var(--teal)':'var(--coral)')+';font-weight:600;white-space:nowrap;padding-top:14px;">'+(br>=0?'+':'')+br.toFixed(1)+'%</span>':'')
+          +(br!=null&&!isNaN(br)?'<span style="font-size:11px;color:'+(br>=0?'var(--teal)':'var(--coral)')+';font-weight:600;white-space:nowrap;padding-top:14px;">'+(br>=0?'+':'')+br.toFixed(1)+'%</span>':'')
+          +(f.name?'<button onclick="window.open(\'https://www.google.com/search?q=\'+encodeURIComponent(\''+escHtml(f.name||'')+' SGD fund factsheet\'),\'_blank\')" style="background:rgba(26,86,219,0.08);border:none;border-radius:4px;padding:3px 6px;color:#1a56db;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0;margin-top:14px;" title="Search factsheet">📄</button>':'')
           +'<button onclick="removeHoldingFund(\''+h.id+'\',\''+f.id+'\')" style="background:var(--coral-light);border:none;border-radius:4px;padding:3px 6px;color:var(--coral);cursor:pointer;font-size:12px;font-weight:700;flex-shrink:0;margin-top:14px;">✕</button>'
         +'</div>'
         +renderCocktailInfo(f.name||'')
@@ -6328,9 +6624,9 @@ function renderStrategyPage() {
                         +'<div style="display:flex;align-items:center;gap:7px;margin-bottom:7px;">'
                           +'<div class="field" style="flex:1;min-width:0;margin-bottom:0;">'
                             +'<label style="font-size:9px;color:var(--purple);font-weight:600;">FUND NAME</label>'
-                            +'<input class="input" value="'+escHtml(f.name||'')+'" placeholder="e.g. Global Equity" style="padding:5px 7px;font-weight:600;" oninput="updateILPFund(\''+p.id+'\',\''+f.id+'\',\'name\',this.value);showFundAutocomplete(this,function(r){updateILPFund(\''+p.id+'\',\''+f.id+'\',\'name\',r.name);updateILPFund(\''+p.id+'\',\''+f.id+'\',\'assetClass\',r.ac);updateILPFund(\''+p.id+'\',\''+f.id+'\',\'region\',r.region);updateILPFund(\''+p.id+'\',\''+f.id+'\',\'sector\',r.sector);updateILPFund(\''+p.id+'\',\''+f.id+'\',\'risk\',r.risk);renderStrategyPage();},\'ut\');">'
+                            +'<input class="input" value="'+escHtml(f.name||'')+'" placeholder="e.g. Global Equity" style="padding:5px 7px;font-weight:600;" oninput="updateILPFund(\''+p.id+'\',\''+f.id+'\',\'name\',this.value);showFundAutocomplete(this,function(r){updateILPFund(\''+p.id+'\',\''+f.id+'\',\'name\',r.name);updateILPFund(\''+p.id+'\',\''+f.id+'\',\'assetClass\',r.ac);updateILPFund(\''+p.id+'\',\''+f.id+'\',\'region\',r.region);updateILPFund(\''+p.id+'\',\''+f.id+'\',\'sector\',r.sector);updateILPFund(\''+p.id+'\',\''+f.id+'\',\'risk\',r.risk);renderStrategyPage();if(FUND_TICKER[r.name])fetchFundReturnsForStratSub(\''+p.id+'\',\''+f.id+'\',r.name);},\'ut\');">'
                           +'</div>'
-                          +(br!==null?'<span style="font-size:11px;color:'+(br>=0?'var(--teal)':'var(--coral)')+';font-weight:600;white-space:nowrap;padding-top:14px;">'+(br>=0?'+':'')+br.toFixed(1)+'%</span>':'')
+                          +(br!=null&&!isNaN(br)?'<span style="font-size:11px;color:'+(br>=0?'var(--teal)':'var(--coral)')+';font-weight:600;white-space:nowrap;padding-top:14px;">'+(br>=0?'+':'')+br.toFixed(1)+'%</span>':'')
                           +'<button onclick="removeILPFund(\''+p.id+'\',\''+f.id+'\')" style="background:var(--coral-light);border:none;border-radius:4px;padding:3px 6px;color:var(--coral);cursor:pointer;font-size:12px;font-weight:700;flex-shrink:0;margin-top:14px;">✕</button>'
                         +'</div>'
                         +renderCocktailInfo(f.name||'')
