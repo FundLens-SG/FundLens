@@ -26,6 +26,7 @@ if ('serviceWorker' in navigator) {
 </script>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
   --bg: #f5f4f0;
@@ -3858,8 +3859,14 @@ var FUND_TICKER = {
   'Blackrock World Gold':['0P0000XQJW.L','0P0000050S.L'],
 };
 
-var FMP_API_KEY = 'dvFHWQOExGtd6PUZXTVm9T4jmyNQPs4G';
-var FINNHUB_KEY = 'd73mejhr01qjjol3i5l0d73mejhr01qjjol3i5lg'; // Get free key at finnhub.io/register (60 calls/min, native CORS)
+// FMP + Finnhub keys are NOT in client code — they live as Worker secrets in
+// the ckg-ai-proxy Cloudflare Worker, which verifies the caller's CKG hub JWT
+// before forwarding. See `_ckg-ai-proxy/src/index.js` for the route definitions.
+// When a user is not signed in to the hub (e.g. opening this file standalone),
+// live metrics are unavailable and holdings keep their database-rated risk
+// values. The literal keys that used to live here have been rotated.
+var FMP_API_KEY = null;   // resolved server-side by ckg-ai-proxy /fmp/<path>
+var FINNHUB_KEY = null;   // resolved server-side by ckg-ai-proxy /finnhub/<path>
 
 // ── USD/SGD exchange rate ──
 var USDSGD_RATE = 1.35; // fallback default
@@ -3907,31 +3914,265 @@ function convertUSDtoSGD(holdingId, field) {
   });
 }
 
-// CORS proxy chain — Cloudflare Worker first (set up your own for guaranteed reliability)
-var CF_WORKER_URL = 'https://fundlens-proxy.chungakwanc.workers.dev/?url='; // e.g. 'https://fundlens-proxy.YOUR-SUBDOMAIN.workers.dev/?url='
-var CORS_PROXIES = [CF_WORKER_URL,'https://corsproxy.io/?','https://api.allorigins.win/raw?url='].filter(function(p){return !!p;});
+// ── Authenticated upstream proxy ──
+// All upstream calls (Yahoo Finance, FMP, Finnhub, FX rates) go through the
+// ckg-ai-proxy Cloudflare Worker. The Worker verifies the caller's CKG hub JWT
+// before forwarding. If no hub session is present, live metric calls return
+// null and FundLens falls back to database-rated risk values.
+var CKG_PROXY = 'https://ckg-ai-proxy.chungakwanc.workers.dev';
 
-// ── CORS proxy helper ──
+// CORS_PROXIES kept for back-compat with any caller that builds full URLs by
+// concatenation. Resolves to the single authenticated /proxy?url= route.
+var CORS_PROXIES = [CKG_PROXY + '/proxy?url='];
+
+function _hubAuthHeaders() {
+  var t = (window._ckgSession && window._ckgSession.access_token) || null;
+  return t ? { authorization: 'Bearer ' + t } : null;
+}
+
+// Resolve `url` into a Worker-relative URL. If `url` already targets the
+// Worker (e.g. /fmp/profile/AAPL or /finnhub/stock/metric?...), it's used
+// as-is. Otherwise it's wrapped with /proxy?url=<encoded> for hosts on the
+// Worker's allow-list (Yahoo, FX rates).
+function _resolveProxyUrl(url) {
+  if (typeof url !== 'string') return null;
+  if (url.indexOf(CKG_PROXY) === 0) return url;
+  if (url.charAt(0) === '/') return CKG_PROXY + url;
+  return CKG_PROXY + '/proxy?url=' + encodeURIComponent(url);
+}
+
 function doFetchUrl(url, cb) {
+  var hdr = _hubAuthHeaders();
+  if (!hdr) { cb(null); return; }
+  var resolved = _resolveProxyUrl(url);
+  if (!resolved) { cb(null); return; }
   try {
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', url, true);
-    xhr.timeout = 10000;
-    xhr.onload = function() { try { cb(JSON.parse(xhr.responseText)); } catch(e) { cb(null); } };
-    xhr.onerror = function() { cb(null); };
-    xhr.ontimeout = function() { cb(null); };
-    xhr.send();
+    var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function(){ try { ctrl.abort(); } catch(e){} }, 12000) : null;
+    fetch(resolved, { headers: hdr, signal: ctrl ? ctrl.signal : undefined })
+      .then(function(r) {
+        if (timer) clearTimeout(timer);
+        if (!r.ok) return null;
+        return r.json().catch(function(){ return null; });
+      })
+      .then(function(data) { cb(data); })
+      .catch(function() { if (timer) clearTimeout(timer); cb(null); });
   } catch(e) { cb(null); }
 }
-function fetchWithProxies(url, cb, idx) {
-  idx = idx || 0;
-  if (idx >= CORS_PROXIES.length) { cb(null); return; }
-  var full = CORS_PROXIES[idx] + encodeURIComponent(url);
-  doFetchUrl(full, function(data) {
-    if (data) { cb(data); return; }
-    fetchWithProxies(url, cb, idx+1);
-  });
+
+// Back-compat shim — every "proxy" now resolves to the same Worker route.
+function fetchWithProxies(url, cb) { doFetchUrl(url, cb); }
+
+// ══════════════════════════════════════════════════
+//  CKG HUB AUTH + GOOGLE DRIVE STORAGE
+//  Mirrors the PolicyLens pattern: same Supabase project (ckgtools-admin),
+//  hub session's provider_token grants drive.file scope. Falls back to the
+//  drive-auth-dev Edge Function when the in-session access_token has expired.
+//  When no hub session is available (e.g. file opened standalone from disk),
+//  every Drive call returns null and FundLens falls back to local download.
+// ══════════════════════════════════════════════════
+var CKG_SUPABASE_URL  = 'https://cbqbvctnrfbxjscgirpn.supabase.co';
+var CKG_SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNicWJ2Y3RucmZieGpzY2dpcnBuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3ODcxMDAsImV4cCI6MjA5MzM2MzEwMH0.OFqwlvZslsibwTN2qgfmIREAI9Bel-BKGnM7D2HV2sM';
+var CKG_DRIVE_FOLDER_NAME = 'FundLens';
+var CKG_DRIVE_LS = {
+  folderId: 'fundlens_drive_folder_id',
+  userEmail: 'fundlens_drive_user_email',
+};
+
+window._SB = null;
+window._user = null;
+window._ckgSession = null;
+window._driveAccessToken = null;
+window._driveTokenExpiresAt = 0;
+
+function _initCkgSupabase() {
+  if (window._SB) return window._SB;
+  try {
+    if (!window.supabase || !window.supabase.createClient) return null;
+    window._SB = window.supabase.createClient(CKG_SUPABASE_URL, CKG_SUPABASE_ANON, {
+      auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: false, flowType: 'pkce' }
+    });
+    return window._SB;
+  } catch(e) { console.warn('[CKG] Supabase init error:', e); return null; }
 }
+
+async function _readHubSession() {
+  var sb = _initCkgSupabase();
+  if (!sb) return null;
+  try {
+    var resp = await sb.auth.getSession();
+    var sess = resp && resp.data ? resp.data.session : null;
+    if (!sess) return null;
+    window._ckgSession = sess;
+    window._user = sess.user || null;
+    return sess;
+  } catch(e) { return null; }
+}
+
+// One-time: hand the refresh_token to the drive-auth-dev Edge Function so
+// future minting can happen without the user signing in again.
+async function _seedDriveTokensIfNeeded() {
+  try {
+    var sb = window._SB; if (!sb || !window._ckgSession) return false;
+    var refreshTok = window._ckgSession.provider_refresh_token;
+    if (!refreshTok) return false;
+    var r = await sb.functions.invoke('drive-auth-dev', {
+      body: { mode: 'store', refresh_token: refreshTok, scope: 'https://www.googleapis.com/auth/drive.file' }
+    });
+    return !r.error;
+  } catch(e) { return false; }
+}
+
+async function _refreshDriveTokenViaEdgeFn() {
+  try {
+    var sb = window._SB; if (!sb) return null;
+    var r = await sb.functions.invoke('drive-auth-dev', { body: { mode: 'refresh' } });
+    if (r.error || !r.data || !r.data.access_token) return null;
+    window._driveTokenExpiresAt = Date.now() + (r.data.expires_in || 3599) * 1000;
+    return r.data.access_token;
+  } catch(e) { return null; }
+}
+
+// Resolve a working Drive access_token. Prefers the in-session provider_token
+// (free); falls back to Edge-Function refresh which uses the refresh_token.
+async function getDriveAccessToken(force) {
+  if (!force && window._driveAccessToken && Date.now() < window._driveTokenExpiresAt - 60_000) {
+    return window._driveAccessToken;
+  }
+  var sess = window._ckgSession || await _readHubSession();
+  if (sess && sess.provider_token && !force) {
+    window._driveAccessToken = sess.provider_token;
+    if (!window._driveTokenExpiresAt) window._driveTokenExpiresAt = Date.now() + 50*60*1000;
+    return window._driveAccessToken;
+  }
+  var t = await _refreshDriveTokenViaEdgeFn();
+  if (t) { window._driveAccessToken = t; return t; }
+  return null;
+}
+
+// Drive fetch with one silent retry on 401.
+async function _driveFetch(url, opts) {
+  opts = opts || {};
+  var tok = await getDriveAccessToken();
+  if (!tok) { var e = new Error('Not signed in to Google Drive'); e.status = 401; throw e; }
+  var headers = Object.assign({}, opts.headers || {}, { authorization: 'Bearer ' + tok });
+  var resp = await fetch(url, Object.assign({}, opts, { headers: headers }));
+  if (resp.status === 401 && !opts._retried) {
+    var fresh = await getDriveAccessToken(true);
+    if (fresh) {
+      return _driveFetch(url, Object.assign({}, opts, {
+        _retried: true,
+        headers: Object.assign({}, opts.headers || {}, { authorization: 'Bearer ' + fresh })
+      }));
+    }
+  }
+  return resp;
+}
+
+async function _ensureFundLensFolder() {
+  var cached = null;
+  try { cached = localStorage.getItem(CKG_DRIVE_LS.folderId); } catch(e) {}
+  if (cached) return cached;
+  // Look for existing folder
+  var q = "mimeType='application/vnd.google-apps.folder' and name='"+CKG_DRIVE_FOLDER_NAME+"' and trashed=false";
+  var listResp = await _driveFetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name)&pageSize=10');
+  var listJson = await listResp.json().catch(function(){return{};});
+  if (listJson.files && listJson.files.length) {
+    var id = listJson.files[0].id;
+    try { localStorage.setItem(CKG_DRIVE_LS.folderId, id); } catch(e) {}
+    return id;
+  }
+  // Create it
+  var meta = { name: CKG_DRIVE_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' };
+  var createResp = await _driveFetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(meta)
+  });
+  var created = await createResp.json().catch(function(){return{};});
+  if (!created.id) throw new Error('Drive folder create failed');
+  try { localStorage.setItem(CKG_DRIVE_LS.folderId, created.id); } catch(e) {}
+  return created.id;
+}
+
+// SHA-256 hex helper (Web Crypto)
+async function _sha256Hex(s) {
+  try {
+    var buf = new TextEncoder().encode(s);
+    var d = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(d)).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
+  } catch(e) { return ''; }
+}
+
+// ckgDrive — high-level Drive API for FundLens save files. JSON-only; no HTML
+// self-modify. The legacy local .html save is still available as an export.
+var ckgDrive = {
+  isAvailable: function() { return !!_hubAuthHeaders(); },
+
+  async list() {
+    var folderId = await _ensureFundLensFolder();
+    var q = "'"+folderId+"' in parents and trashed=false and mimeType='application/json'";
+    var url = 'https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)
+      +'&fields=files(id,name,modifiedTime,size,appProperties)&orderBy=modifiedTime desc&pageSize=100';
+    var resp = await _driveFetch(url);
+    var json = await resp.json().catch(function(){return{};});
+    return json.files || [];
+  },
+
+  // payload: { holdings, clientInfo, stratProducts, _ts, _ver, _checksum }
+  async save(payload, opts) {
+    opts = opts || {};
+    var folderId = await _ensureFundLensFolder();
+    var name = opts.name || ('FundLens — ' + (payload.clientInfo && payload.clientInfo.name ? payload.clientInfo.name : 'Untitled'));
+    var fileName = name.replace(/[\\\/]/g,' ') + ' ' + new Date().toISOString().slice(0,10) + '.json';
+    var body = JSON.stringify(payload, null, 2);
+    var metadata = {
+      name: fileName,
+      mimeType: 'application/json',
+      appProperties: {
+        kind: 'fundlens-portfolio',
+        schemaVersion: String(payload._ver || 3),
+        clientName: (payload.clientInfo && payload.clientInfo.name) || ''
+      }
+    };
+    var fileId = opts.fileId || null;
+    var url, method;
+    if (fileId) {
+      url = 'https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent(fileId)+'?uploadType=multipart&fields=id,modifiedTime';
+      method = 'PATCH';
+    } else {
+      metadata.parents = [folderId];
+      url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime';
+      method = 'POST';
+    }
+    var boundary = '----FundLensBoundary'+Date.now();
+    var multipart =
+      '--'+boundary+'\r\n'
+      +'Content-Type: application/json; charset=UTF-8\r\n\r\n'
+      +JSON.stringify(metadata)+'\r\n'
+      +'--'+boundary+'\r\n'
+      +'Content-Type: application/json; charset=UTF-8\r\n\r\n'
+      +body+'\r\n'
+      +'--'+boundary+'--';
+    var resp = await _driveFetch(url, {
+      method: method,
+      headers: { 'content-type': 'multipart/related; boundary='+boundary },
+      body: multipart
+    });
+    var result = await resp.json().catch(function(){return{};});
+    if (!resp.ok || !result.id) {
+      throw new Error('Drive save failed: ' + ((result.error && result.error.message) || resp.status));
+    }
+    return { fileId: result.id, modifiedTime: result.modifiedTime, fileName: fileName };
+  },
+
+  async load(fileId) {
+    var resp = await _driveFetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media');
+    if (!resp.ok) throw new Error('Drive load failed: '+resp.status);
+    return await resp.text();
+  }
+};
+window.ckgDrive = ckgDrive;
 
 // ── CFA-aligned sector-adjusted risk scoring ──
 // Sector groups for D/E interpretation
@@ -4345,11 +4586,11 @@ function resolveFundTickers(fundName, callback) {
     callback([TICKER_MAP[fundName]]);
     return;
   }
-  // 3. Dynamic search via Yahoo Finance search API
+  // 3. Dynamic search via Yahoo Finance search API (through authenticated proxy)
   var searchUrl = 'https://query1.finance.yahoo.com/v1/finance/search?q='+encodeURIComponent(fundName)+'&quotesCount=12&newsCount=0&enableFuzzyQuery=true';
-  fetch(CORS_PROXIES[0]+encodeURIComponent(searchUrl))
-    .then(function(r){return r.json();})
-    .then(function(data) {
+  doFetchUrl(searchUrl, function(data) {
+    if (!data) { callback([]); return; }
+    try {
       var quotes = data.quotes || [];
       // Filter for funds/ETFs — prioritise MUTUALFUND, ETF types
       var fundTickers = [];
@@ -4385,23 +4626,10 @@ function resolveFundTickers(fundName, callback) {
       } else {
         callback([]);
       }
-    })
-    .catch(function() {
-      // Try secondary proxy
-      if (CORS_PROXIES.length > 1) {
-        fetch(CORS_PROXIES[1]+encodeURIComponent(searchUrl))
-          .then(function(r){return r.json();})
-          .then(function(data) {
-            var quotes = data.quotes || [];
-            var tickers = quotes.filter(function(q){
-              var t = (q.quoteType||'').toUpperCase();
-              return ['MUTUALFUND','ETF','EQUITY'].indexOf(t)>=0;
-            }).slice(0,5).map(function(q){return q.symbol;});
-            if (tickers.length) FUND_TICKER[fundName] = tickers;
-            callback(tickers);
-          }).catch(function(){callback([]);});
-      } else { callback([]); }
-    });
+    } catch (e) {
+      callback([]);
+    }
+  });
 }
 
 function fetchFundReturns(holdingId) {
@@ -4427,28 +4655,21 @@ function fetchFundReturns(holdingId) {
 
     candidates.forEach(function(ticker) {
       var url = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=max&interval=1mo';
-      function tryFetch(proxyIdx) {
-        if (proxyIdx >= CORS_PROXIES.length) { checkDone(); return; }
-        fetch(CORS_PROXIES[proxyIdx] + encodeURIComponent(url))
-          .then(function(r){return r.json();})
-          .then(function(data) {
-            try {
-              var result = data.chart ? data.chart.result[0] : null;
-              if (!result || !result.indicators) throw new Error('No data');
-              var closes = result.indicators.adjclose ? result.indicators.adjclose[0].adjclose : result.indicators.quote[0].close;
-              var timestamps = result.timestamp;
-              if (!closes || !timestamps || closes.length < 2) throw new Error('Insufficient');
-              var valid = [];
-              for (var i = 0; i < closes.length; i++) {
-                if (closes[i] != null && timestamps[i] != null) valid.push({t:timestamps[i]*1000, p:closes[i]});
-              }
-              if (valid.length >= 2) results.push({ticker:ticker, data:valid, firstTs:valid[0].t});
-            } catch(e) {}
-            checkDone();
-          })
-          .catch(function() { tryFetch(proxyIdx+1); });
-      }
-      tryFetch(0);
+      doFetchUrl(url, function(data) {
+        try {
+          var result = (data && data.chart) ? data.chart.result[0] : null;
+          if (!result || !result.indicators) throw new Error('No data');
+          var closes = result.indicators.adjclose ? result.indicators.adjclose[0].adjclose : result.indicators.quote[0].close;
+          var timestamps = result.timestamp;
+          if (!closes || !timestamps || closes.length < 2) throw new Error('Insufficient');
+          var valid = [];
+          for (var i = 0; i < closes.length; i++) {
+            if (closes[i] != null && timestamps[i] != null) valid.push({t:timestamps[i]*1000, p:closes[i]});
+          }
+          if (valid.length >= 2) results.push({ticker:ticker, data:valid, firstTs:valid[0].t});
+        } catch(e) {}
+        checkDone();
+      });
     });
 
     function checkDone() {
@@ -4510,9 +4731,10 @@ function fetchFundReturnsForSub(holdingId, fundId, fundName) {
     var results = []; var done = 0;
     candidates.forEach(function(ticker) {
       var url = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=max&interval=1mo';
-      fetch(CORS_PROXIES[0]+encodeURIComponent(url)).then(function(r){return r.json();}).then(function(data) {
+      doFetchUrl(url, function(data) {
         try {
-          var result = data.chart.result[0];
+          var result = data && data.chart ? data.chart.result[0] : null;
+          if (!result) throw new Error('No data');
           var closes = result.indicators.adjclose ? result.indicators.adjclose[0].adjclose : result.indicators.quote[0].close;
           var timestamps = result.timestamp;
           var valid = [];
@@ -4520,7 +4742,7 @@ function fetchFundReturnsForSub(holdingId, fundId, fundName) {
           if (valid.length>=2) results.push({ticker:ticker,data:valid,firstTs:valid[0].t});
         } catch(e) {}
         if(++done>=candidates.length) applySubFundData(holdingId,fundId,results);
-      }).catch(function(){if(++done>=candidates.length) applySubFundData(holdingId,fundId,results);});
+      });
     });
   });
 }
@@ -4549,9 +4771,10 @@ function fetchFundReturnsForStratSub(prodId, fundId, fundName) {
     var results = []; var done = 0;
     candidates.forEach(function(ticker) {
       var url = 'https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(ticker)+'?range=max&interval=1mo';
-      fetch(CORS_PROXIES[0]+encodeURIComponent(url)).then(function(r){return r.json();}).then(function(data) {
+      doFetchUrl(url, function(data) {
         try {
-          var result = data.chart.result[0];
+          var result = data && data.chart ? data.chart.result[0] : null;
+          if (!result) throw new Error('No data');
           var closes = result.indicators.adjclose ? result.indicators.adjclose[0].adjclose : result.indicators.quote[0].close;
           var timestamps = result.timestamp;
           var valid = [];
@@ -4567,7 +4790,7 @@ function fetchFundReturnsForStratSub(prodId, fundId, fundName) {
             if (f && retData.sinceInception != null) f.histAvg = retData.sinceInception;
           }
         }
-      }).catch(function(){done++;});
+      });
     });
   });
 }
@@ -4647,14 +4870,14 @@ function formatReturnDisplay(retData, ticker) {
 // ── Dividend yield fetch from Yahoo quoteSummary ──
 function fetchDividendYield(ticker, callback) {
   var url = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/'+encodeURIComponent(ticker)+'?modules=summaryDetail';
-  fetch(CORS_PROXIES[0]+encodeURIComponent(url)).then(function(r){return r.json();}).then(function(data) {
+  doFetchUrl(url, function(data) {
     try {
       var sd = data.quoteSummary.result[0].summaryDetail;
       var divYield = sd.trailingAnnualDividendYield ? sd.trailingAnnualDividendYield.raw : null;
       if (!divYield && sd.yield) divYield = sd.yield.raw;
       callback(divYield);
     } catch(e) { callback(null); }
-  }).catch(function() { callback(null); });
+  });
 }
 
 function fetchStockMetrics(holdingId) {
@@ -4723,8 +4946,9 @@ function fetchStockMetrics(holdingId) {
         }
       }
 
-      // FALLBACK 3: FMP (US stocks, via CORS proxy)
-      var fmpUrl = 'https://financialmodelingprep.com/api/v3/profile/'+encodeURIComponent(ticker)+'?apikey='+FMP_API_KEY;
+      // FALLBACK 3: FMP (US stocks) via authenticated /fmp/ proxy route.
+      // Worker injects the apikey server-side; 'profile' is the v3 endpoint suffix.
+      var fmpUrl = CKG_PROXY + '/fmp/profile/' + encodeURIComponent(ticker);
       fetchWithProxies(fmpUrl, function(fData) {
         if (fData && fData[0]) {
           var p = fData[0];
@@ -4739,34 +4963,33 @@ function fetchStockMetrics(holdingId) {
           return;
         }
 
-        // FALLBACK 4: Finnhub (has native CORS — no proxy needed, 60 calls/min)
-        if (FINNHUB_KEY) {
-          if (statusEl) statusEl.innerHTML = '<span style="color:var(--teal);">⏳ Trying Finnhub for '+ticker+'...</span>';
-          var fhUrl = 'https://finnhub.io/api/v1/stock/metric?symbol='+encodeURIComponent(ticker)+'&metric=all&token='+FINNHUB_KEY;
-          doFetchUrl(fhUrl, function(fhData) {
-            if (fhData && fhData.metric) {
-              var m = fhData.metric;
-              var beta = m.beta || null;
-              var de = m['totalDebt/totalEquityAnnual'] || null;
-              var vol = m['52WeekHigh'] && m['52WeekLow'] && m['52WeekHigh']>0
-                ? Math.round(((m['52WeekHigh']-m['52WeekLow'])/((m['52WeekHigh']+m['52WeekLow'])/2))*100/2)
-                : (beta ? Math.round(Math.abs(beta)*16) : 25);
-              var mktCap = m.marketCapitalization ? m.marketCapitalization * 1e6 : 0;
-              var qual = mktCap>200e9?1:mktCap>50e9?2:mktCap>10e9?3:mktCap>2e9?4:5;
-              h.fmpBeta=beta; h.fmpDE=de; h.fmpVol=vol; h.fmpMktCap=mktCap;
-              h.fmpQual=qual; h.fmpSource='Finnhub';
-              h.risk=calcStockRisk(beta||1.0,vol,de,qual,h.sector);
-              renderHoldings(); refreshAnalysis();
-              showToast(ticker+' (Finnhub): β='+((beta||0).toFixed(2))+' D/E='+((de||0).toFixed(2))+' → R'+h.risk);
-              return;
-            }
-            // Everything failed
-            if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted);">Using database risk rating (R'+(h.risk||5)+'). All live sources unavailable.</span>';
-          });
-          return;
-        }
-        // No Finnhub key — final failure
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted);">Using database risk rating (R'+(h.risk||5)+'). All live sources unavailable.</span>';
+        // FALLBACK 4: Finnhub via authenticated /finnhub/ proxy route.
+        // Worker injects the token server-side.
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--teal);">⏳ Trying Finnhub for '+ticker+'...</span>';
+        var fhUrl = CKG_PROXY + '/finnhub/stock/metric?symbol=' + encodeURIComponent(ticker) + '&metric=all';
+        doFetchUrl(fhUrl, function(fhData) {
+          if (fhData && fhData.metric) {
+            var m = fhData.metric;
+            var beta = m.beta || null;
+            var de = m['totalDebt/totalEquityAnnual'] || null;
+            var vol = m['52WeekHigh'] && m['52WeekLow'] && m['52WeekHigh']>0
+              ? Math.round(((m['52WeekHigh']-m['52WeekLow'])/((m['52WeekHigh']+m['52WeekLow'])/2))*100/2)
+              : (beta ? Math.round(Math.abs(beta)*16) : 25);
+            var mktCap = m.marketCapitalization ? m.marketCapitalization * 1e6 : 0;
+            var qual = mktCap>200e9?1:mktCap>50e9?2:mktCap>10e9?3:mktCap>2e9?4:5;
+            h.fmpBeta=beta; h.fmpDE=de; h.fmpVol=vol; h.fmpMktCap=mktCap;
+            h.fmpQual=qual; h.fmpSource='Finnhub';
+            h.risk=calcStockRisk(beta||1.0,vol,de,qual,h.sector);
+            renderHoldings(); refreshAnalysis();
+            showToast(ticker+' (Finnhub): β='+((beta||0).toFixed(2))+' D/E='+((de||0).toFixed(2))+' → R'+h.risk);
+            return;
+          }
+          // Everything failed — likely because no hub session is present.
+          var msg = _hubAuthHeaders()
+            ? 'Using database risk rating (R'+(h.risk||5)+'). All live sources unavailable.'
+            : 'Live metrics require sign-in via ckgtools.com. Using database risk rating (R'+(h.risk||5)+').';
+          if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted);">'+msg+'</span>';
+        });
       });
     });
   });
@@ -6438,12 +6661,33 @@ function _doAutoSave() {
       var el = document.getElementById(domId);
       if (el) clientInfo[ciFields[domId]] = el.value || '';
     });
+
+    // PII handling: when running under the CKG hub, the canonical store is
+    // Google Drive and localStorage is just a crash-recovery cache — strip
+    // identifying fields so they don't sit in browser storage on shared
+    // devices. Risk profile + age stay because they affect rendering and
+    // are non-identifying. Standalone (no hub session) keeps full clientInfo
+    // so the file behaves like the legacy version.
+    var hubAuthed = !!_hubAuthHeaders();
+    var ciToCache;
+    if (hubAuthed) {
+      ciToCache = {
+        name: '', nric: '', phone: '', email: '', notes: '',
+        age: clientInfo.age || '',
+        retireAge: clientInfo.retireAge || '',
+        riskProfile: clientInfo.riskProfile || 'moderate'
+      };
+    } else {
+      ciToCache = clientInfo;
+    }
+
     var state = {
       holdings: holdings,
       stratProducts: typeof stratProducts!=='undefined' ? stratProducts : [],
-      clientInfo: clientInfo,
+      clientInfo: ciToCache,
       _ts: Date.now(),
-      _ver: 2
+      _ver: 3,
+      _hub: hubAuthed
     };
     var json = JSON.stringify(state);
     if (json.length > 4 * 1024 * 1024) {
@@ -7538,19 +7782,63 @@ function populateClientInfo() {
 // ══════════════════════════════════════════════════
 //  SAVE / LOAD
 // ══════════════════════════════════════════════════
-function saveFile() {
-  // Collect all current input values from client info
-  var ciEl;
-  ciEl = document.getElementById('ci-name');   if (ciEl) clientInfo.name = ciEl.value;
-  ciEl = document.getElementById('ci-age');    if (ciEl) clientInfo.age = ciEl.value;
-  ciEl = document.getElementById('ci-nric');   if (ciEl) clientInfo.nric = ciEl.value;
-  ciEl = document.getElementById('ci-phone');  if (ciEl) clientInfo.phone = ciEl.value;
-  ciEl = document.getElementById('ci-email');  if (ciEl) clientInfo.email = ciEl.value;
-  ciEl = document.getElementById('ci-notes');  if (ciEl) clientInfo.notes = ciEl.value;
-  ciEl = document.getElementById('ci-risk');   if (ciEl) clientInfo.riskProfile = ciEl.value;
+// ── Sync DOM client-info fields back into the in-memory clientInfo. ──
+function _syncClientInfoFromDOM() {
+  var map = ['name','age','nric','phone','email','notes','riskProfile','retireAge'];
+  var ids = {name:'ci-name',age:'ci-age',nric:'ci-nric',phone:'ci-phone',email:'ci-email',notes:'ci-notes',riskProfile:'ci-risk',retireAge:'ci-retire'};
+  map.forEach(function(k){
+    var el = document.getElementById(ids[k]);
+    if (el) clientInfo[k] = el.value;
+  });
+}
 
+// ── Build the canonical save payload (used by both Drive + local fallback). ──
+async function _buildSavePayload() {
+  _syncClientInfoFromDOM();
+  var saveHoldings = JSON.parse(JSON.stringify(holdings));
+  saveHoldings.forEach(function(h){delete h._fetchStatus;delete h._fetchYears;delete h._fetchIncep;});
+  var payload = {
+    _ver: 3,
+    _ts: Date.now(),
+    _format: 'fundlens-portfolio-v3',
+    holdings: saveHoldings,
+    clientInfo: clientInfo,
+    stratProducts: typeof stratProducts !== 'undefined' ? stratProducts : []
+  };
+  // Add tamper-detection checksum (SHA-256 of canonical body without _checksum field)
+  var canonical = JSON.stringify({h:payload.holdings, c:payload.clientInfo, s:payload.stratProducts, t:payload._ts, v:payload._ver});
+  payload._checksum = await _sha256Hex(canonical);
+  return payload;
+}
+
+// ── Drive save (preferred when hub session exists). ──
+async function saveFile() {
+  if (ckgDrive.isAvailable()) {
+    try {
+      showToast('💾 Saving to Google Drive…');
+      var payload = await _buildSavePayload();
+      var res = await ckgDrive.save(payload);
+      showToast('✓ Saved to Drive: ' + res.fileName);
+      return;
+    } catch (e) {
+      console.warn('[CKG] Drive save failed, falling back to local download:', e && e.message);
+      showToast('⚠ Drive save failed — downloading locally instead');
+      // fall through to local download
+    }
+  }
+  return _saveFileLocal();
+}
+
+// ── Local-download fallback (used when standalone or when Drive errors). ──
+// Keeps the legacy self-modifying HTML behaviour so the file the advisor
+// downloads can be reopened anywhere offline.
+async function _saveFileLocal() {
+  _syncClientInfoFromDOM();
+
+  // The escape sequence below avoids any "*/" inside user-typed strings
+  // closing the FUNDLENS_STATE comment block prematurely.
   function safeJSON(obj) {
-    return JSON.stringify(obj).replace(/<\//g,'<\\/');
+    return JSON.stringify(obj).replace(/<\//g,'<\\/').replace(/\*\//g,'*\\/');
   }
 
   // Clear dynamic content to get clean DOM, then restore after capture
@@ -7605,63 +7893,145 @@ function saveFile() {
   a.download = fname;
   a.click();
   URL.revokeObjectURL(a.href);
-  showToast('💾 Saved: ' + fname);
+  showToast('💾 Downloaded: ' + fname);
 }
 
-function loadFile() {
+// Migration: ensure every holding object has fields the rest of the app expects.
+function _migrateLoadedHoldings(arr) {
+  (arr || []).forEach(function(h) {
+    if (h.usdValue === undefined) h.usdValue = null;
+    if (h.usdCost === undefined) h.usdCost = null;
+    if (h.ilpFunds === undefined) h.ilpFunds = [];
+    if (h.sector === undefined) h.sector = 'multi_sector';
+    if (h.incepDate === undefined) h.incepDate = '';
+    if (h.startDate === undefined) h.startDate = '';
+    if (h.fmpBeta === undefined) h.fmpBeta = null;
+    if (h.fmpSource === undefined) h.fmpSource = null;
+  });
+}
+
+// Apply a parsed save payload (Drive or local) to the running app.
+function _applySavePayload(payload) {
+  if (!payload || !Array.isArray(payload.holdings)) throw new Error('Malformed save payload');
+  holdings = payload.holdings;
+  _migrateLoadedHoldings(holdings);
+  if (payload.clientInfo) clientInfo = payload.clientInfo;
+  if (Array.isArray(payload.stratProducts)) stratProducts = payload.stratProducts;
+  populateClientInfo();
+  holdings.forEach(function(h){ if (h.type==='ilp' && h.premAmt) calcILPYield(h); });
+  safeRender(renderHoldings);
+  safeRender(renderOverview);
+  safeRender(renderStrategyPage);
+  safeRender(renderProjection);
+  _doAutoSave();
+}
+
+// Drive picker modal — shows the user's saved FundLens portfolios.
+async function _showDrivePicker() {
+  var existing = document.getElementById('fundlens-drive-picker');
+  if (existing) existing.remove();
+  var modal = document.createElement('div');
+  modal.id = 'fundlens-drive-picker';
+  modal.setAttribute('role','dialog');
+  modal.setAttribute('aria-label','Open FundLens portfolio from Google Drive');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:9998;';
+  modal.innerHTML = '<div style="background:#fff;border-radius:12px;padding:18px;max-width:520px;width:90vw;max-height:80vh;overflow:auto;font-family:IBM Plex Sans,sans-serif;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">'
+      +'<div style="font-weight:700;color:#111318;font-size:15px;">Load from Google Drive</div>'
+      +'<button id="fundlens-drive-close" aria-label="Close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#7a808c;">×</button>'
+    +'</div>'
+    +'<div id="fundlens-drive-list" style="font-size:13px;color:#111318;">⏳ Loading saved portfolios…</div>'
+    +'<div style="margin-top:14px;border-top:1px solid #eee;padding-top:10px;display:flex;gap:8px;justify-content:flex-end;">'
+      +'<button id="fundlens-drive-local" style="background:#f5f4f0;border:none;border-radius:6px;padding:8px 14px;font-size:12px;cursor:pointer;color:#111318;">Open local .html instead</button>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(modal);
+  function close(){ modal.remove(); }
+  document.getElementById('fundlens-drive-close').onclick = close;
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  document.getElementById('fundlens-drive-local').onclick = function(){ close(); _loadFileLocal(); };
+  try {
+    var files = await ckgDrive.list();
+    var listEl = document.getElementById('fundlens-drive-list');
+    if (!files.length) {
+      listEl.innerHTML = '<div style="color:#7a808c;padding:8px 0;">No saved portfolios yet. Save one to see it here.</div>';
+      return;
+    }
+    listEl.innerHTML = files.map(function(f) {
+      var when = f.modifiedTime ? new Date(f.modifiedTime).toLocaleString() : '';
+      var label = (f.appProperties && f.appProperties.clientName) || f.name.replace(/\.json$/,'');
+      return '<button type="button" data-id="'+escHtml(f.id)+'" class="fundlens-drive-item" style="display:block;width:100%;text-align:left;background:#f5f4f0;border:none;border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;font-family:inherit;">'
+        +'<div style="font-weight:600;color:#111318;">'+escHtml(label)+'</div>'
+        +'<div style="font-size:11px;color:#7a808c;margin-top:2px;">'+escHtml(when)+'</div>'
+      +'</button>';
+    }).join('');
+    Array.prototype.forEach.call(listEl.querySelectorAll('.fundlens-drive-item'), function(btn) {
+      btn.onclick = async function() {
+        var id = btn.getAttribute('data-id');
+        try {
+          showToast('⏳ Loading from Drive…');
+          var raw = await ckgDrive.load(id);
+          var payload = JSON.parse(raw);
+          _applySavePayload(payload);
+          showToast('✓ Loaded: ' + (clientInfo.name || 'Portfolio') + ' (' + holdings.length + ' holdings)');
+        } catch (e) {
+          alert('Error loading from Drive: ' + (e && e.message));
+        } finally {
+          close();
+        }
+      };
+    });
+  } catch (e) {
+    document.getElementById('fundlens-drive-list').innerHTML = '<div style="color:#a9381f;">Could not list Drive files: '+escHtml(e.message||'')+'</div>';
+  }
+}
+
+async function loadFile() {
+  if (ckgDrive.isAvailable()) {
+    return _showDrivePicker();
+  }
+  return _loadFileLocal();
+}
+
+// Local file picker fallback — accepts either the legacy .html save or the
+// new .json export format.
+function _loadFileLocal() {
   var inp = document.createElement('input');
   inp.type = 'file';
-  inp.accept = '.html';
+  inp.accept = '.html,.json,application/json,text/html';
   inp.onchange = function() {
     if (!inp.files || !inp.files[0]) return;
+    var file = inp.files[0];
     var reader = new FileReader();
     reader.onload = function(e) {
-      var html = e.target.result;
+      var raw = e.target.result;
       try {
-        // Extract holdings from STATE markers
-        var stateMatch = html.match(/\/\*__FUNDLENS_STATE_START__\*\/([\s\S]*?)\/\*__FUNDLENS_STATE_END__\*\//);
-        if (!stateMatch) { alert('Not a valid FundLens® save file.'); return; }
+        // 1. Try JSON-format save
+        if (/\.json$/i.test(file.name) || raw.charAt(0) === '{') {
+          var payload = JSON.parse(raw);
+          _applySavePayload(payload);
+          showToast('Loaded: ' + (clientInfo.name || 'Portfolio') + ' (' + holdings.length + ' holdings)');
+          return;
+        }
+        // 2. Legacy HTML self-modifying save
+        var stateMatch = raw.match(/\/\*__FUNDLENS_STATE_START__\*\/([\s\S]*?)\/\*__FUNDLENS_STATE_END__\*\//);
+        if (!stateMatch) { alert('Not a valid FundLens save file.'); return; }
         var stateCode = stateMatch[1];
-        // Extract holdings array
         var hMatch = stateCode.match(/var holdings\s*=\s*(\[[\s\S]*?\]);/);
         var cMatch = stateCode.match(/var clientInfo\s*=\s*(\{[\s\S]*?\});/);
-        if (hMatch) {
-          holdings = JSON.parse(hMatch[1]);
-          // Migration safety
-          holdings.forEach(function(h) {
-            if (h.usdValue === undefined) h.usdValue = null;
-            if (h.usdCost === undefined) h.usdCost = null;
-            if (h.ilpFunds === undefined) h.ilpFunds = [];
-            if (h.sector === undefined) h.sector = 'multi_sector';
-            if (h.incepDate === undefined) h.incepDate = '';
-            if (h.startDate === undefined) h.startDate = '';
-            if (h.fmpBeta === undefined) h.fmpBeta = null;
-            if (h.fmpSource === undefined) h.fmpSource = null;
-          });
-        }
-        if (cMatch) {
-          clientInfo = JSON.parse(cMatch[1]);
-        }
-        // Extract stratProducts from STRAT markers
-        var stratMatch = html.match(/\/\*__FUNDLENS_STRAT_START__\*\/([\s\S]*?)\/\*__FUNDLENS_STRAT_END__\*\//);
+        var loaded = { holdings: hMatch ? JSON.parse(hMatch[1]) : [], clientInfo: cMatch ? JSON.parse(cMatch[1]) : clientInfo };
+        var stratMatch = raw.match(/\/\*__FUNDLENS_STRAT_START__\*\/([\s\S]*?)\/\*__FUNDLENS_STRAT_END__\*\//);
         if (stratMatch) {
           var sMatch = stratMatch[1].match(/var stratProducts\s*=\s*(\[[\s\S]*?\]);/);
-          if (sMatch) stratProducts = JSON.parse(sMatch[1]);
+          if (sMatch) loaded.stratProducts = JSON.parse(sMatch[1]);
         }
-        // Re-render everything
-        populateClientInfo();
-        holdings.forEach(function(h){ if (h.type==='ilp' && h.premAmt) calcILPYield(h); });
-        safeRender(renderHoldings);
-        safeRender(renderOverview);
-        safeRender(renderStrategyPage);
-        safeRender(renderProjection);
-        _doAutoSave();
+        _applySavePayload(loaded);
         showToast('Loaded: ' + (clientInfo.name || 'Portfolio') + ' (' + holdings.length + ' holdings)');
       } catch(err) {
         alert('Error loading file: ' + err.message);
       }
     };
-    reader.readAsText(inp.files[0]);
+    reader.readAsText(file);
   };
   inp.click();
 }
@@ -8422,6 +8792,28 @@ try {
   safeRender(renderOverview);
   safeRender(renderStrategyPage);
   safeRender(renderProjection);
+
+  // ── Hub auth + Drive boot (async, non-blocking) ──
+  // When loaded under ckgtools.com the user already has a Supabase session in
+  // localStorage. We pick it up, seed/refresh the Drive token, then refresh
+  // any data that depended on the authenticated proxy (FX rate).
+  (async function bootCkgHub() {
+    var sb = _initCkgSupabase();
+    if (!sb) return; // Supabase JS CDN failed to load — standalone mode
+    var sess = await _readHubSession();
+    if (!sess) return; // not signed in — local fallback for save/load
+    // Hub-authed: skip the FundLens disclaimer (the hub already gates access).
+    try { localStorage.setItem('fundlens_disclaimer_accepted','1'); } catch(e) {}
+    var disc = document.getElementById('disclaimer-modal');
+    if (disc) disc.style.display = 'none';
+    // Seed refresh_token to Edge Function (idempotent), then mint an access_token.
+    await _seedDriveTokensIfNeeded();
+    var tok = await getDriveAccessToken();
+    console.log('[CKG] Hub boot:', sess.user && sess.user.email, '| drive token:', tok ? 'ok' : 'reconnect-needed');
+    // Now that we have the JWT, re-fetch FX rate (the boot-time call ran
+    // before the session was hydrated, so it returned null).
+    try { fetchUSDSGD(); } catch(e) {}
+  })();
 } catch(e) {
   console.error('FundLens init error:', e);
 }
