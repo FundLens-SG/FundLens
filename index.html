@@ -579,9 +579,12 @@ body { max-width: 100vw; }
 :root { --ckg-strip-h: 36px; }
 @media (max-width: 640px) { :root { --ckg-strip-h: 44px; } }
 body { padding-top: var(--ckg-strip-h) !important; }
-/* Override FundLens's own sticky elements so they dock under the strip */
+/* Override FundLens's own sticky elements so they dock under the strip.
+   The page-topbar (page title + actions) is intentionally NOT sticky —
+   the CKG strip already provides global chrome, and a second sticky bar
+   was visually clipping the first row of page content on scroll. */
 .sidebar { top: var(--ckg-strip-h) !important; height: calc(100vh - var(--ckg-strip-h)) !important; }
-.topbar { top: var(--ckg-strip-h) !important; }
+.topbar { position: static !important; top: auto !important; }
 .ckg-suite-strip {
   position: fixed; top: 0; left: 0; right: 0;
   height: var(--ckg-strip-h);
