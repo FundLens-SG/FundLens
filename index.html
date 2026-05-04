@@ -151,7 +151,8 @@ body {
 }
 .nav-item:hover { background: rgba(255,255,255,0.04); color: #fff; }
 .nav-item.active { border-left-color: var(--teal-mid); color: #fff; background: rgba(214,168,122,0.12); }
-.nav-icon { font-size: 15px; width: 18px; text-align: center; }
+.nav-icon { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.85; }
+.nav-item:hover .nav-icon, .nav-item.active .nav-icon { opacity: 1; }
 .sidebar-footer {
   margin-top: auto; padding: 18px 22px;
   border-top: 1px solid rgba(255,255,255,0.07);
@@ -195,6 +196,13 @@ body {
 .card-title {
   font-family: 'Newsreader', 'Playfair Display', serif;
   font-size: 15px; color: var(--ink); margin-bottom: 3px;
+  position: relative; padding-left: 14px;
+}
+.card-title::before {
+  content: ''; position: absolute;
+  left: 0; top: 0.62em;
+  width: 8px; height: 1px;
+  background: var(--teal);
 }
 .card-sub { font-size: 11.5px; color: var(--muted); margin-bottom: 16px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
@@ -205,19 +213,28 @@ body {
 .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
 .kpi {
   background: var(--card); border: 1px solid var(--border);
-  border-radius: 10px; padding: 16px 18px;
+  border-radius: 10px; padding: 16px 18px 16px 22px;
   position: relative; overflow: hidden;
 }
 .kpi::after {
-  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 3px;
 }
 .kpi.teal::after { background: var(--teal); }
 .kpi.amber::after { background: var(--amber); }
 .kpi.coral::after { background: var(--coral); }
 .kpi.blue::after { background: var(--blue); }
 .kpi.purple::after { background: var(--purple); }
-.kpi-label { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; }
-.kpi-value { font-family: 'Newsreader', 'Playfair Display', serif; font-size: 24px; color: var(--ink); margin: 4px 0 1px; }
+.kpi-label {
+  font-family: 'Geist Mono', 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 9.5px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 1.4px;
+  font-weight: 500;
+}
+.kpi-value {
+  font-family: 'Newsreader', 'Playfair Display', serif;
+  font-size: 28px; color: var(--ink); margin: 6px 0 2px;
+  font-weight: 500; letter-spacing: -0.01em; line-height: 1.1;
+}
 .kpi-note { font-size: 11px; color: var(--muted); }
 .kpi-note.pos { color: var(--teal); font-weight: 600; }
 .kpi-note.neg { color: var(--coral); font-weight: 600; }
@@ -381,7 +398,11 @@ button, .mob-btn, .bnav-item { -webkit-tap-highlight-color: transparent; }
 ══════════════════════════════════════ */
 
 /* Prevent horizontal overflow everywhere */
-html, body { overflow-x: hidden; max-width: 100vw; }
+/* overflow-x:hidden on html only — body must NOT be a scroll container,
+   otherwise sticky elements measure top: from body's padded content edge
+   (creating a gap below the fixed CKG strip equal to body padding-top). */
+html { overflow-x: hidden; max-width: 100vw; }
+body { max-width: 100vw; }
 * { min-width: 0; } /* prevent grid blowout */
 
 /* ── MOBILE TOPBAR (outside .app) ── */
@@ -431,7 +452,8 @@ html, body { overflow-x: hidden; max-width: 100vw; }
   -webkit-tap-highlight-color: transparent; min-height: 50px;
 }
 .bnav-item.active { color: var(--teal-mid); }
-.bnav-icon { font-size: 18px; line-height: 1; }
+.bnav-icon { width: 18px; height: 18px; line-height: 1; opacity: 0.85; }
+.bnav-item.active .bnav-icon { opacity: 1; }
 
 /* ── MOBILE FAB (outside .app) ── */
 .mob-fab {
@@ -728,22 +750,22 @@ body { padding-top: var(--ckg-strip-h) !important; }
 <div class="bottom-nav">
   <div class="bottom-nav-inner">
     <div class="bnav-item active" id="bnav-overview" onclick="showPage('overview')">
-      <span class="bnav-icon">⬡</span>Overview
+      <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><polygon points="8,2 13.5,5 13.5,11 8,14 2.5,11 2.5,5"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/></svg>Overview
     </div>
     <div class="bnav-item" id="bnav-holdings" onclick="showPage('holdings')">
-      <span class="bnav-icon">📋</span>Holdings
+      <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="4.5" x2="13" y2="4.5"/><line x1="3" y1="8" x2="11" y2="8"/><line x1="3" y1="11.5" x2="13" y2="11.5"/></svg>Holdings
     </div>
     <div class="bnav-item" id="bnav-performance" onclick="showPage('performance')">
-      <span class="bnav-icon">📈</span>Returns
+      <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="3.5" y1="13" x2="3.5" y2="10"/><line x1="6.8" y1="13" x2="6.8" y2="7.5"/><line x1="10.1" y1="13" x2="10.1" y2="5"/><line x1="13.4" y1="13" x2="13.4" y2="3"/></svg>Returns
     </div>
     <div class="bnav-item" id="bnav-projection" onclick="showPage('projection')">
-      <span class="bnav-icon">🔭</span>Projection
+      <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M 2 12 Q 7 9 11.5 4"/><circle cx="11.5" cy="4" r="1.2" fill="currentColor" stroke="none"/></svg>Projection
     </div>
     <div class="bnav-item" id="bnav-health" onclick="showPage('health')">
-      <span class="bnav-icon">❤</span>Health
+      <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="2,8 5,8 6.5,4 8.5,12 10,8 14,8"/></svg>Health
     </div>
     <div class="bnav-item" id="bnav-simulate" onclick="showPage('simulate')">
-      <span class="bnav-icon">🎲</span>Simulate
+      <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M 2 13 Q 4.5 13 6 8 Q 8 1 10 8 Q 11.5 13 14 13"/></svg>Simulate
     </div>
   </div>
 </div>
@@ -773,26 +795,33 @@ body { padding-top: var(--ckg-strip-h) !important; }
   <nav style="padding:12px 0;flex:1;">
     <div class="nav-section">Analysis</div>
     <div class="nav-item active" onclick="showPage('overview')">
-      <span class="nav-icon">⬡</span> Portfolio Overview
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><polygon points="8,2 13.5,5 13.5,11 8,14 2.5,11 2.5,5"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/></svg>
+      Portfolio Overview
     </div>
     <div class="nav-item" onclick="showPage('holdings')">
-      <span class="nav-icon">📋</span> Holdings Register
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="4.5" x2="13" y2="4.5"/><line x1="3" y1="8" x2="11" y2="8"/><line x1="3" y1="11.5" x2="13" y2="11.5"/></svg>
+      Holdings Register
     </div>
     <div class="nav-item" onclick="showPage('performance')">
-      <span class="nav-icon">📈</span> Performance
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="3.5" y1="13" x2="3.5" y2="10"/><line x1="6.8" y1="13" x2="6.8" y2="7.5"/><line x1="10.1" y1="13" x2="10.1" y2="5"/><line x1="13.4" y1="13" x2="13.4" y2="3"/></svg>
+      Performance
     </div>
     <div class="nav-section">Tools</div>
     <div class="nav-item" onclick="showPage('projection')">
-      <span class="nav-icon">🔭</span> Projection
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M 2 12 Q 7 9 11.5 4"/><circle cx="11.5" cy="4" r="1.2" fill="currentColor" stroke="none"/></svg>
+      Projection
     </div>
     <div class="nav-item" onclick="showPage('compare')">
-      <span class="nav-icon">⚖</span> Fund Comparison
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><line x1="5" y1="13" x2="5" y2="7"/><line x1="11" y1="13" x2="11" y2="3"/></svg>
+      Fund Comparison
     </div>
     <div class="nav-item" onclick="showPage('health')">
-      <span class="nav-icon">❤</span> Portfolio Health
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="2,8 5,8 6.5,4 8.5,12 10,8 14,8"/></svg>
+      Portfolio Health
     </div>
     <div class="nav-item" onclick="showPage('simulate')">
-      <span class="nav-icon">🎲</span> Risk Simulator
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M 2 13 Q 4.5 13 6 8 Q 8 1 10 8 Q 11.5 13 14 13"/></svg>
+      Risk Simulator
     </div>
   </nav>
   <div class="sidebar-footer">FundLens® · Private Portfolio Intelligence<br>Singapore · v1.0</div>
@@ -5284,6 +5313,16 @@ function showFundAutocomplete(inputEl, onSelect, holdingType) {
 // Guard: if Chart.js CDN fails, provide no-op fallback
 if (typeof Chart === 'undefined') {
   var Chart = function(){ return {destroy:function(){},update:function(){}}; };
+}
+// Brand-aligned Chart.js typography defaults — pure visual, no functional impact
+if (typeof Chart !== 'undefined' && Chart && Chart.defaults) {
+  try {
+    Chart.defaults.color = '#7a808c';
+    Chart.defaults.borderColor = 'rgba(226,223,215,0.6)';
+    Chart.defaults.font = Chart.defaults.font || {};
+    Chart.defaults.font.family = "'Geist', 'IBM Plex Sans', system-ui, sans-serif";
+    Chart.defaults.font.size = 11;
+  } catch(e) {}
 }
 // Safe canvas context getter
 function safeCtx(canvas) {
