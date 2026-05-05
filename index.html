@@ -720,6 +720,7 @@ body { padding-top: var(--ckg-strip-h) !important; }
   </div>
   <div class="mob-actions">
     <button class="mob-btn" onclick="saveFile()" title="Save">💾</button>
+    <button class="mob-btn mob-btn-ghost" onclick="saveFileAs()" title="Save As (new Drive file)">💾+</button>
     <button class="mob-btn mob-btn-ghost" onclick="loadFile()" title="Load">📂</button>
     <button class="mob-btn mob-btn-ghost" onclick="generateReport()" title="Report">📄</button>
     <button class="mob-btn mob-btn-ghost" onclick="document.getElementById('mob-overflow').style.display=document.getElementById('mob-overflow').style.display==='flex'?'none':'flex'" title="More">⋮</button>
@@ -841,6 +842,7 @@ body { padding-top: var(--ckg-strip-h) !important; }
   </div>
   <div class="topbar-right">
     <button class="btn btn-amber" onclick="saveFile()">💾 Save</button>
+    <button class="btn btn-ghost" onclick="saveFileAs()" title="Save as new Drive file">💾 Save As</button>
     <button class="btn btn-ghost" onclick="loadFile()">📂 Load</button>
     <button class="btn btn-ghost" onclick="generateReport()">📄 Report</button>
     <button class="btn btn-ghost" onclick="importSample()">🎲 Sample</button>
@@ -6832,7 +6834,16 @@ var _autoSaveTimer = null;
 function autoSave() {
   // Debounce: wait 500ms after last change to save (prevents rapid-fire writes on mobile)
   if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
-  _autoSaveTimer = setTimeout(function() { _doAutoSave(); }, 500);
+  _autoSaveTimer = setTimeout(function() {
+    _doAutoSave();
+    // Cloud autosave runs on the same debounce. localStorage stays as
+    // crash-recovery; the cloud row is the cross-device source of truth.
+    if (typeof _doCkgCloudAutosave === 'function') {
+      _doCkgCloudAutosave().catch(function(e){
+        console.warn('[FundLens] cloud autosave threw:', e && e.message);
+      });
+    }
+  }, 500);
 }
 function _doAutoSave() {
   if (_suppressAutoSave) return;
@@ -6939,6 +6950,196 @@ function autoLoad() {
 function clearAutoSave() {
   try { if (typeof localStorage !== 'undefined') localStorage.removeItem('fundlens_autosave'); } catch(e) {}
 }
+
+// ── ckg cloud autosave ───────────────────────────────────────────────
+// Every state change (debounced 500ms by autoSave above) upserts the
+// current portfolio into fundlens.autosave on ckgtools-admin. Each
+// (user, client_label) gets its own row so an FC can juggle multiple
+// clients and resume any of them. is_current marks the one to restore
+// on next page load.
+//
+// NOTE — the schema uses a unique index on (user_id, client_label) and
+// a partial unique index on (user_id) where is_current=true. We:
+//   1. UPDATE all of the user's rows to is_current=false (clears stale)
+//   2. UPSERT the current row with is_current=true
+// in two calls because Supabase JS doesn't support compound UPSERT
+// with conditional flags in one round-trip.
+var _ckgCloudAutosaveInflight = false;
+var _ckgCloudAutosaveLastTs   = 0;
+var _ckgExplicitSaveTs        = 0;   // updated when user clicks Drive Save
+var _ckgCurrentAutosaveLabel  = null;
+
+function _ckgCurrentClientLabel() {
+  var nm = (clientInfo && clientInfo.name) ? String(clientInfo.name).trim() : '';
+  if (!nm) nm = 'Untitled';
+  return nm.slice(0, 120);
+}
+
+async function _doCkgCloudAutosave() {
+  if (_suppressAutoSave) return;
+  var sb = window._SB;
+  if (!sb || !window._ckgSession) return;
+  var uid = window._ckgSession.user && window._ckgSession.user.id;
+  if (!uid) return;
+  // Skip if there's nothing to save (no holdings AND no client name)
+  if ((!holdings || holdings.length === 0) && !(clientInfo && clientInfo.name)) return;
+  if (_ckgCloudAutosaveInflight) return;
+  _ckgCloudAutosaveInflight = true;
+  try {
+    var label = _ckgCurrentClientLabel();
+    var payload = {
+      _ver: 3,
+      _ts: Date.now(),
+      _format: 'fundlens-portfolio-v3',
+      holdings: holdings || [],
+      clientInfo: clientInfo || {},
+      stratProducts: typeof stratProducts !== 'undefined' ? stratProducts : []
+    };
+    // Step 1: clear is_current on all other rows for this user.
+    await sb.schema('fundlens').from('autosave')
+      .update({ is_current: false })
+      .eq('user_id', uid)
+      .neq('client_label', label);
+    // Step 2: upsert the current row.
+    var { error } = await sb.schema('fundlens').from('autosave').upsert({
+      user_id: uid,
+      client_label: label,
+      payload: payload,
+      updated_at: new Date().toISOString(),
+      is_current: true
+    }, { onConflict: 'user_id,client_label' });
+    if (error) {
+      console.warn('[FundLens] cloud autosave error:', error.message);
+    } else {
+      _ckgCloudAutosaveLastTs = Date.now();
+      _ckgCurrentAutosaveLabel = label;
+    }
+  } finally {
+    _ckgCloudAutosaveInflight = false;
+  }
+}
+
+// Boot-time restore: query the user's is_current=true row. If it
+// exists AND was updated more recently than the local autosave (or
+// localStorage is empty), restore it and show a small toast.
+async function ckgCloudAutoLoad() {
+  var sb = window._SB;
+  if (!sb || !window._ckgSession) return false;
+  var uid = window._ckgSession.user && window._ckgSession.user.id;
+  if (!uid) return false;
+  try {
+    var { data, error } = await sb.schema('fundlens').from('autosave')
+      .select('payload, client_label, updated_at')
+      .eq('user_id', uid)
+      .eq('is_current', true)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      // PGRST116 = no rows. Fine.
+      if (error.code !== 'PGRST116') {
+        console.warn('[FundLens] cloud autoload error:', error.message);
+      }
+      return false;
+    }
+    if (!data || !data.payload) return false;
+    // Compare timestamps with localStorage to avoid clobbering a fresher local edit.
+    var localTs = 0;
+    try {
+      var localRaw = localStorage.getItem('fundlens_autosave');
+      if (localRaw) localTs = (JSON.parse(localRaw)._ts) || 0;
+    } catch (_) {}
+    var cloudTs = new Date(data.updated_at).getTime();
+    if (localTs > cloudTs + 5000) return false; // local is meaningfully newer
+    // Apply the cloud payload.
+    _suppressAutoSave = true;
+    try {
+      _applySavePayload(data.payload);
+      _ckgCurrentAutosaveLabel = data.client_label;
+      _ckgCloudAutosaveLastTs  = cloudTs;
+    } finally {
+      // Re-enable autosave on next tick so applySavePayload's renders
+      // don't immediately re-fire the autosave for the same data.
+      setTimeout(function () { _suppressAutoSave = false; }, 100);
+    }
+    var ago = _ckgFmtAgo(cloudTs);
+    showToast('☁ Resumed: ' + (data.client_label || 'Portfolio') + ' · ' + (data.payload.holdings || []).length + ' holdings · ' + ago);
+    return true;
+  } catch (e) {
+    console.warn('[FundLens] cloud autoload threw:', e && e.message);
+    return false;
+  }
+}
+
+function _ckgFmtAgo(ts) {
+  var diff = Date.now() - ts;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  return Math.floor(diff / 86400000) + 'd ago';
+}
+
+// ── ckg leave-guard for FundLens ────────────────────────────────────
+// Three states the guard cares about:
+//   1. Clean: cloud autosave is up-to-date AND the explicit Drive save
+//      isn't meaningfully stale → no prompt, navigate.
+//   2. Drive-stale (autosave fresh, Drive save older or absent):
+//      prompt 'Save to Drive too before leaving?' with [Save to Drive],
+//      [Leave (autosaved)], [Stay].
+//   3. Autosave in-flight: very brief — Wait & save spins for up to
+//      3 seconds for the in-flight write to settle.
+function _ckgFundLensIsDirty() {
+  // Nothing to save → nothing to ask.
+  if ((!holdings || holdings.length === 0) && !(clientInfo && clientInfo.name)) return false;
+  if (_ckgCloudAutosaveInflight) return true;
+  // If we've never explicitly saved AND the autosave is fresh, the
+  // user might still want to commit a permanent file. We treat that
+  // as "ask once" rather than spamming on every navigation.
+  if (_ckgCloudAutosaveLastTs === 0 && _ckgExplicitSaveTs === 0) return false;
+  if (_ckgExplicitSaveTs >= _ckgCloudAutosaveLastTs) return false;   // explicit save is fresh
+  // Drive-stale: autosave has data the explicit save doesn't.
+  return true;
+}
+(function _ckgRegisterFundLensGuard() {
+  function tryRegister() {
+    if (typeof window.ckgRegisterLeaveGuard !== 'function') return false;
+    window.ckgRegisterLeaveGuard({
+      isDirty: _ckgFundLensIsDirty,
+      describe: function () {
+        if (_ckgCloudAutosaveInflight) {
+          return {
+            title:        'Cloud autosave in flight',
+            message:      'Wait briefly for the autosave to land, or leave anyway (your work is already in localStorage as a fallback)?',
+            primaryLabel: 'Wait & save',
+            primaryAction: async function () {
+              var deadline = Date.now() + 3000;
+              while (_ckgCloudAutosaveInflight && Date.now() < deadline) {
+                await new Promise(function (r) { setTimeout(r, 200); });
+              }
+            },
+            secondaryLabel: 'Leave anyway',
+            secondaryAction: function () {},
+          };
+        }
+        return {
+          title:        'Save to Drive before leaving?',
+          message:      'Your changes are autosaved to the cloud and will resume next time you open FundLens. Save a permanent Drive file too (so you can email or archive it)?',
+          primaryLabel: 'Save to Drive',
+          primaryAction: async function () { await saveFile(); },
+          secondaryLabel: 'Leave (autosaved)',
+          secondaryAction: function () {},
+        };
+      },
+    });
+    return true;
+  }
+  if (!tryRegister()) {
+    var tries = 0;
+    var iv = setInterval(function () {
+      if (tryRegister() || ++tries > 20) clearInterval(iv);
+    }, 250);
+  }
+})();
 
 var _suppressAutoSave = false;
 function resetAll() {
@@ -8003,7 +8204,13 @@ async function saveFile() {
     try {
       showToast('💾 Saving to Google Drive…');
       var payload = await _buildSavePayload();
-      var res = await ckgDrive.save(payload);
+      // If we have a linked file from a prior save/load, overwrite it
+      // (PATCH same fileId). Otherwise create a fresh file.
+      var saveOpts = {};
+      if (_ckgLinkedFileId) saveOpts.fileId = _ckgLinkedFileId;
+      var res = await ckgDrive.save(payload, saveOpts);
+      _ckgLinkedFileId = res.fileId;
+      _ckgExplicitSaveTs = Date.now();
       showToast('✓ Saved to Drive: ' + res.fileName);
       return;
     } catch (e) {
@@ -8012,8 +8219,39 @@ async function saveFile() {
       // fall through to local download
     }
   }
-  return _saveFileLocal();
+  var rv = await _saveFileLocal();
+  _ckgExplicitSaveTs = Date.now();
+  return rv;
 }
+
+// ── Save As — always creates a NEW Drive file, with a custom name. ──
+// Falls back to local download if the hub session isn't available.
+var _ckgLinkedFileId = null;  // set by saveFile / load — Save updates this file in place
+async function saveFileAs() {
+  if (!ckgDrive.isAvailable()) {
+    // Without Drive, Save As is effectively the same as Save
+    // (both produce a fresh local download with a date in the filename).
+    return _saveFileLocal();
+  }
+  // Ask the user for a label. Default uses the current client name.
+  var defaultName = 'FundLens — ' + ((clientInfo && clientInfo.name) ? clientInfo.name : 'Untitled');
+  var customName = window.prompt('Save as (Drive file name, without extension):', defaultName);
+  if (customName === null) return;            // cancelled
+  customName = customName.trim();
+  if (!customName) customName = defaultName;
+  try {
+    showToast('💾 Saving as "' + customName + '"…');
+    var payload = await _buildSavePayload();
+    var res = await ckgDrive.save(payload, { name: customName });   // no fileId = new file
+    _ckgLinkedFileId   = res.fileId;
+    _ckgExplicitSaveTs = Date.now();
+    showToast('✓ Saved to Drive: ' + res.fileName);
+  } catch (e) {
+    console.warn('[CKG] Save As failed:', e && e.message);
+    showToast('⚠ Save As failed — try Save (fallback to local download)');
+  }
+}
+window.saveFileAs = saveFileAs;
 
 // ── Local-download fallback (used when standalone or when Drive errors). ──
 // Keeps the legacy self-modifying HTML behaviour so the file the advisor
@@ -8159,6 +8397,10 @@ async function _showDrivePicker() {
           var raw = await ckgDrive.load(id);
           var payload = JSON.parse(raw);
           _applySavePayload(payload);
+          // Link this Drive file to subsequent Save calls so users can
+          // overwrite-in-place. Save As still always creates a new file.
+          _ckgLinkedFileId   = id;
+          _ckgExplicitSaveTs = Date.now();   // load counts as fresh-from-source
           showToast('✓ Loaded: ' + (clientInfo.name || 'Portfolio') + ' (' + holdings.length + ' holdings)');
         } catch (e) {
           alert('Error loading from Drive: ' + (e && e.message));
@@ -8972,6 +9214,17 @@ try {
     // Push saved file data into localStorage so edits persist
     _doAutoSave();
   }
+  // ckg cloud autoload: after the local-cache step, try to resume the
+  // user's last cloud-autosaved client. If the cloud row is fresher
+  // than the local cache (or local is empty), it overwrites. The
+  // function itself decides — we just kick it off.
+  setTimeout(function () {
+    if (typeof ckgCloudAutoLoad === 'function') {
+      ckgCloudAutoLoad().catch(function (e) {
+        console.warn('[FundLens] cloud autoload threw:', e && e.message);
+      });
+    }
+  }, 800);  // Wait for hub-session resolution to complete
   holdings.forEach(function(h){ if (h.type==='ilp' && h.premAmt) calcILPYield(h); });
   populateClientInfo();
   safeRender(renderHoldings);
