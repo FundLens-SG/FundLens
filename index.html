@@ -4248,6 +4248,26 @@ async function _driveFetch(url, opts) {
 }
 
 async function _ensureFundLensFolder() {
+  // Standardised location: My Drive / CKGTools / FundLens / Portfolios.
+  // Falls back to the legacy single-folder behaviour if the shared
+  // ckgDriveFolders helper isn't available (standalone/offline use).
+  if (window.ckgDriveFolders && typeof window.ckgDriveFolders.ensureSubfolder === 'function') {
+    // Expose the FundLens token getter for the shared helper if not
+    // already wired (used by ckgDriveFolders' fetch wrapper).
+    if (!window._ckgGetDriveToken) {
+      window._ckgGetDriveToken = async function () {
+        return (await _hubAuthHeaders())
+          ? (await _readHubSession())?.provider_token || null
+          : null;
+      };
+    }
+    try {
+      return await window.ckgDriveFolders.ensureSubfolder('fundlens', 'Portfolios');
+    } catch (e) {
+      console.warn('[FundLens] shared folder helper failed, falling back:', e && e.message);
+      // fall through to legacy path below
+    }
+  }
   var cached = null;
   try { cached = localStorage.getItem(CKG_DRIVE_LS.folderId); } catch(e) {}
   if (cached) return cached;
