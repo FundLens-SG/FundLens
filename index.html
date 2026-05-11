@@ -4206,11 +4206,30 @@ async function _seedDriveTokensIfNeeded() {
   } catch(e) { return false; }
 }
 
+function _surfaceGoogleCoreMismatch(status) {
+  if (!status || !status.mismatch) return;
+  var now = Date.now();
+  if (window.__fundlensGoogleMismatchWarnedAt && (now - window.__fundlensGoogleMismatchWarnedAt) < 10 * 60 * 1000) return;
+  window.__fundlensGoogleMismatchWarnedAt = now;
+  var google = status.googleEmail || 'another Google account';
+  var hub = status.hubEmail || status.actingAsMainEmail || 'your CKGTools account';
+  if (typeof showToast === 'function') showToast('⚠ Drive account: ' + google + ' ≠ ' + hub);
+  else console.warn('[FundLens] Google account mismatch:', status);
+}
+
 async function _refreshDriveTokenViaEdgeFn() {
   try {
+    if (window.ckgGoogle && typeof window.ckgGoogle.getAccessToken === 'function') {
+      var token = await window.ckgGoogle.getAccessToken();
+      if (token) {
+        window._driveTokenExpiresAt = Date.now() + 50 * 60 * 1000;
+        return token;
+      }
+    }
     var sb = window._SB; if (!sb) return null;
     var r = await sb.functions.invoke('drive-auth-dev', { body: { mode: 'refresh' } });
     if (r.error || !r.data || !r.data.access_token) return null;
+    _surfaceGoogleCoreMismatch(r.data);
     window._driveTokenExpiresAt = Date.now() + (r.data.expires_in || 3599) * 1000;
     return r.data.access_token;
   } catch(e) { return null; }
@@ -4252,6 +4271,17 @@ async function _driveFetch(url, opts) {
   return resp;
 }
 
+(function bindFundLensGoogleCore() {
+  if (window.__fundlensGoogleCoreBound) return;
+  if (!window.ckgGoogle || typeof window.ckgGoogle.on !== 'function') {
+    setTimeout(bindFundLensGoogleCore, 200);
+    return;
+  }
+  window.__fundlensGoogleCoreBound = true;
+  window.ckgGoogle.on('mismatch', _surfaceGoogleCoreMismatch);
+  window.ckgGoogle.status().then(_surfaceGoogleCoreMismatch).catch(function(){});
+})();
+
 async function _ensureFundLensFolder() {
   // Standardised location: My Drive / CKGTools / FundLens / Portfolios.
   // Falls back to the legacy single-folder behaviour if the shared
@@ -4261,9 +4291,7 @@ async function _ensureFundLensFolder() {
     // already wired (used by ckgDriveFolders' fetch wrapper).
     if (!window._ckgGetDriveToken) {
       window._ckgGetDriveToken = async function () {
-        return (await _hubAuthHeaders())
-          ? (await _readHubSession())?.provider_token || null
-          : null;
+        return await getDriveAccessToken(true);
       };
     }
     try {
