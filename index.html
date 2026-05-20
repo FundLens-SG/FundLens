@@ -338,6 +338,27 @@ tr:hover td { background: #fbfaf7; }
 .holding-row-header {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 12px; gap: 10px;
+  cursor: pointer;
+}
+.holding-row-header:hover input[data-hname] { background: rgba(11,107,92,0.04); border-radius: 4px; }
+.holding-row-header input[data-hname] { padding: 2px 4px; transition: background 0.12s; }
+.holding-row-header input[data-hname]:focus { background: rgba(11,107,92,0.06); outline: 1.5px solid rgba(11,107,92,0.35); outline-offset: -1px; border-radius: 4px; }
+
+/* Add-controls toolbar on the Holdings page — visually distinct, full-width, action buttons never offscreen */
+.holdings-toolbar {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+  box-shadow: var(--shadow);
+}
+.holdings-toolbar-msg { flex: 1; min-width: 160px; font-size: 13px; color: var(--muted); }
+@media (max-width: 768px) {
+  .holdings-toolbar { padding: 10px 12px; }
+  .holdings-toolbar-msg { font-size: 11.5px; width: 100%; flex-basis: 100%; }
 }
 .holding-type-pill {
   font-size: 10px; font-weight: 600; padding: 2px 7px;
@@ -471,6 +492,100 @@ body { max-width: 100vw; }
   line-height: 1;
 }
 .mob-fab:active { transform: scale(0.91); }
+
+/* ── STATED-PROFILE ALIGNMENT BANNER (Patch C) ── */
+.alignment-banner {
+  background: linear-gradient(135deg,#ffffff 0%,#faf6ef 100%);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--teal);
+  border-radius: 9px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow);
+}
+.alignment-banner-row { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.alignment-banner-cell { display: flex; flex-direction: column; gap: 2px; min-width: 110px; }
+.alignment-banner-k { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600; }
+.alignment-banner-v { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+@media (max-width: 768px) {
+  .alignment-banner { padding: 10px 12px; }
+  .alignment-banner-row { gap: 12px; }
+  .alignment-banner-cell { min-width: 0; flex: 1; }
+  .alignment-banner-k { font-size: 9px; }
+  .alignment-banner-v { font-size: 12px; }
+}
+
+/* ── PRESENT MODE (Patch E) ── */
+body.present-mode .sidebar,
+body.present-mode .topbar,
+body.present-mode .bottom-nav,
+body.present-mode .mob-fab,
+body.present-mode .mobile-topbar,
+body.present-mode .ckg-suite-strip { display: none !important; }
+body.present-mode { padding-top: 0 !important; }
+body.present-mode .main { width: 100% !important; max-width: 100% !important; padding: 0 !important; }
+body.present-mode .page { padding: 20px 32px 28px !important; }
+body.present-mode #frontier-chart-box { height: calc(100vh - 320px) !important; min-height: 420px; }
+body.present-mode .frontier-headline-card { font-size: 110%; }
+body.present-mode #frontier-headline { font-size: 17px !important; line-height: 1.6 !important; }
+body.present-mode .alignment-banner,
+body.present-mode .holdings-toolbar { display: none !important; }
+.present-exit {
+  display: none;
+  position: fixed; top: 16px; right: 16px; z-index: 9999;
+  background: #1f1b16; color: #f4ecdf;
+  border: 1px solid #d6a87a; border-radius: 8px;
+  padding: 8px 14px; font-size: 12.5px; font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.18);
+}
+body.present-mode .present-exit { display: inline-flex; align-items: center; gap: 6px; }
+.present-exit:hover { background: #2a241d; }
+
+/* ── ONE-PAGER PRINT VIEW (Patch E) ── */
+@media print {
+  body.print-onepager .ckg-suite-strip,
+  body.print-onepager .sidebar,
+  body.print-onepager .topbar,
+  body.print-onepager .bottom-nav,
+  body.print-onepager .mob-fab,
+  body.print-onepager .mobile-topbar,
+  body.print-onepager .holdings-toolbar,
+  body.print-onepager .alignment-banner,
+  body.print-onepager #frontier-legend,
+  body.print-onepager .grid-2 .card:first-child,
+  body.print-onepager .present-exit { display: none !important; }
+  body.print-onepager { padding-top: 0 !important; background: #fff !important; }
+  body.print-onepager .main { width: 100% !important; padding: 0 !important; }
+  body.print-onepager .page { padding: 12mm 12mm 0 !important; }
+  body.print-onepager #frontier-chart-box { height: 130mm !important; }
+  body.print-onepager .frontier-headline-card { box-shadow: none !important; }
+  body.print-onepager .grid-2 { display: block !important; }
+  body.print-onepager .grid-2 .card { margin-bottom: 8mm; box-shadow: none !important; }
+}
+
+/* ── EFFICIENT FRONTIER PAGE ── */
+.frontier-headline-card { background: linear-gradient(135deg, #ffffff 0%, #faf6ef 100%); }
+.frontier-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 12px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+}
+.frontier-chip.match { background: var(--teal-light); color: var(--teal); }
+.frontier-chip.gap   { background: var(--amber-light); color: var(--amber); }
+.frontier-chip.miss  { background: var(--coral-light); color: var(--coral); }
+.frontier-tp { margin-bottom: 12px; padding-left: 11px; border-left: 2px solid var(--border); }
+.frontier-tp:last-child { margin-bottom: 0; }
+.frontier-tp > .frontier-tp-title { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--teal); margin-bottom: 3px; font-weight: 700; }
+.frontier-tp strong { font-weight: 700; color: var(--ink); }
+@media (max-width: 768px) {
+  #frontier-chart-box { height: 360px !important; }
+  .frontier-headline-card .card-title { font-size: 13px; }
+  #frontier-headline { font-size: 13px !important; }
+}
+@media (max-width: 480px) {
+  #frontier-chart-box { height: 300px !important; }
+}
 
 /* ══════════════════════════════════════
    RESPONSIVE: MOBILE ≤ 768px
@@ -639,6 +754,10 @@ body { padding-top: var(--ckg-strip-h) !important; }
 </style>
 </head>
 <body>
+
+<!-- Present-mode exit button (Patch E) -->
+<button class="present-exit" onclick="togglePresentMode()" title="Exit Present mode (Esc)">✕ Exit Present</button>
+
 <div class="ckg-suite-strip" role="navigation" aria-label="CKG suite">
   <a href="https://ckgtools.com/" class="ckg-suite-strip-back" aria-label="Back to CKG suite">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="6" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
@@ -767,8 +886,8 @@ body { padding-top: var(--ckg-strip-h) !important; }
     <div class="bnav-item" id="bnav-projection" onclick="showPage('projection')">
       <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M 2 12 Q 7 9 11.5 4"/><circle cx="11.5" cy="4" r="1.2" fill="currentColor" stroke="none"/></svg>Projection
     </div>
-    <div class="bnav-item" id="bnav-compare" onclick="showPage('compare')">
-      <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><line x1="5" y1="13" x2="5" y2="7"/><line x1="11" y1="13" x2="11" y2="3"/></svg>Compare
+    <div class="bnav-item" id="bnav-frontier" onclick="showPage('frontier')">
+      <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 2 13 Q 6 11 9 7.5 T 14 3"/><circle cx="4.5" cy="11.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="9" r="1.1" fill="currentColor" stroke="none"/><circle cx="11.5" cy="5.5" r="1.4" fill="currentColor" stroke="none"/></svg>Frontier
     </div>
     <div class="bnav-item" id="bnav-health" onclick="showPage('health')">
       <svg class="bnav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="2,8 5,8 6.5,4 8.5,12 10,8 14,8"/></svg>Health
@@ -815,6 +934,10 @@ body { padding-top: var(--ckg-strip-h) !important; }
       <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><line x1="3.5" y1="13" x2="3.5" y2="10"/><line x1="6.8" y1="13" x2="6.8" y2="7.5"/><line x1="10.1" y1="13" x2="10.1" y2="5"/><line x1="13.4" y1="13" x2="13.4" y2="3"/></svg>
       Performance
     </div>
+    <div class="nav-item" onclick="showPage('frontier')">
+      <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M 2 13 Q 6 11 9 7.5 T 14 3"/><circle cx="4.5" cy="11.5" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="9" r="1.1" fill="currentColor" stroke="none"/><circle cx="11.5" cy="5.5" r="1.4" fill="currentColor" stroke="none"/></svg>
+      Efficient Frontier
+    </div>
     <div class="nav-section">Tools</div>
     <div class="nav-item" onclick="showPage('projection')">
       <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M 2 12 Q 7 9 11.5 4"/><circle cx="11.5" cy="4" r="1.2" fill="currentColor" stroke="none"/></svg>
@@ -846,10 +969,12 @@ body { padding-top: var(--ckg-strip-h) !important; }
     <div class="topbar-sub" id="page-sub">All holdings · asset class · region · performance</div>
   </div>
   <div class="topbar-right">
-    <button class="btn btn-amber" onclick="saveFile()"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M2.5 2.5 H9 L11.5 5 V11.5 H2.5 Z"/><path d="M4.5 2.5 V5 H8.5 V2.5"/><rect x="4" y="8" width="6" height="3.5"/></svg>Save</button>
-    <button class="btn btn-ghost" onclick="saveFileAs()" title="Save as new Drive file"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M1.5 2.5 H7 L9 4.5 V11 H1.5 Z"/><path d="M3 2.5 V4.5 H6.5 V2.5"/><line x1="11.5" y1="2.5" x2="11.5" y2="6"/><line x1="9.5" y1="4.25" x2="13.5" y2="4.25"/></svg>Save As</button>
-    <button class="btn btn-ghost" onclick="loadFile()"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M1.5 4 V11.5 H12.5 V5 H6.5 L5 3.5 H1.5 Z"/></svg>Load</button>
-    <button class="btn btn-ghost" onclick="generateReport()"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M3 1.5 H8.5 L11 4 V12.5 H3 Z"/><path d="M8.5 1.5 V4 H11"/><line x1="5" y1="6.5" x2="9" y2="6.5"/><line x1="5" y1="9" x2="9" y2="9"/></svg>Report</button>
+    <button class="btn btn-amber" onclick="saveFile()" title="Save current client portfolio to Google Drive"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M2.5 2.5 H9 L11.5 5 V11.5 H2.5 Z"/><path d="M4.5 2.5 V5 H8.5 V2.5"/><rect x="4" y="8" width="6" height="3.5"/></svg>Save</button>
+    <button class="btn btn-ghost" onclick="saveFileAs()" title="Save as a new client file in Google Drive"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M1.5 2.5 H7 L9 4.5 V11 H1.5 Z"/><path d="M3 2.5 V4.5 H6.5 V2.5"/><line x1="11.5" y1="2.5" x2="11.5" y2="6"/><line x1="9.5" y1="4.25" x2="13.5" y2="4.25"/></svg>Save As</button>
+    <button class="btn btn-ghost" onclick="loadFile()" title="Open an existing client file from Google Drive"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M1.5 4 V11.5 H12.5 V5 H6.5 L5 3.5 H1.5 Z"/></svg>Load</button>
+    <button class="btn btn-ghost" onclick="generateReport()" title="Generate full 4-page client report PDF"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M3 1.5 H8.5 L11 4 V12.5 H3 Z"/><path d="M8.5 1.5 V4 H11"/><line x1="5" y1="6.5" x2="9" y2="6.5"/><line x1="5" y1="9" x2="9" y2="9"/></svg>Report</button>
+    <button class="btn btn-ghost" onclick="printOnePager()" title="Print or save a one-page client summary"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="3" y="2" width="8" height="3"/><rect x="2" y="5" width="10" height="5" rx="1"/><rect x="3.5" y="8.5" width="7" height="4"/><circle cx="10" cy="6.5" r="0.5" fill="currentColor"/></svg>1-Page</button>
+    <button class="btn btn-ghost" onclick="togglePresentMode()" title="Full-screen Present mode for client meetings"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><polyline points="2,5 2,2 5,2"/><polyline points="9,2 12,2 12,5"/><polyline points="12,9 12,12 9,12"/><polyline points="5,12 2,12 2,9"/></svg>Present</button>
     <button class="btn btn-ghost" onclick="importSample()"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><line x1="7" y1="2" x2="7" y2="12"/><line x1="2" y1="7" x2="12" y2="7"/><line x1="3.5" y1="3.5" x2="10.5" y2="10.5"/><line x1="10.5" y1="3.5" x2="3.5" y2="10.5"/></svg>Sample</button>
     <button class="btn btn-ghost" onclick="document.getElementById('disclaimer-modal').style.display='flex'"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="5.3"/><line x1="7" y1="6.5" x2="7" y2="10"/><circle cx="7" cy="4.5" r="0.5" fill="currentColor"/></svg>Info</button>
     <button class="btn btn-ghost" style="color:var(--coral);border-color:var(--coral);" onclick="resetAll()"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M2.5 7 A 4.5 4.5 0 1 1 7 11.5"/><polyline points="1.5 4.5, 2.5 7, 5 6"/></svg>Reset</button>
@@ -891,6 +1016,16 @@ body { padding-top: var(--ckg-strip-h) !important; }
         <div class="field"><label>Email</label><input class="input" id="ci-email" type="email" placeholder="john@email.com" oninput="clientInfo.email=this.value"></div>
         <div class="field"><label>Notes</label><input class="input" id="ci-notes" placeholder="e.g. retiring 2040" oninput="clientInfo.notes=this.value"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- Stated profile vs actual portfolio alignment banner (Patch C) -->
+  <div id="profile-alignment-banner" class="alignment-banner" style="display:none;">
+    <div class="alignment-banner-row">
+      <div class="alignment-banner-cell"><span class="alignment-banner-k">Stated profile</span><span class="alignment-banner-v" id="ab-stated">—</span></div>
+      <div class="alignment-banner-cell"><span class="alignment-banner-k">Actual portfolio risk</span><span class="alignment-banner-v" id="ab-actual">—</span></div>
+      <div class="alignment-banner-cell"><span class="alignment-banner-k">Alignment</span><span id="ab-chip" class="alignment-banner-v">—</span></div>
+      <div class="alignment-banner-cell" style="flex:1;text-align:right;"><a href="#" id="ab-cta" onclick="event.preventDefault();showPage('frontier');" style="font-size:11.5px;font-weight:600;color:var(--teal);text-decoration:none;">View on frontier →</a></div>
     </div>
   </div>
 
@@ -982,11 +1117,9 @@ body { padding-top: var(--ckg-strip-h) !important; }
      PAGE: HOLDINGS
 ═══════════════════════════════════════════ -->
 <div id="page-holdings" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-    <div>
-      <div style="font-size:13px;color:var(--muted);">Enter each fund, stock, or instrument individually. Returns are p.a. figures.</div>
-    </div>
-    <button class="btn btn-teal" onclick="addHolding()">+ Manual</button>
+  <div class="holdings-toolbar">
+    <div class="holdings-toolbar-msg">Enter each fund, stock, or instrument individually. Returns are p.a. figures.</div>
+    <button class="btn btn-teal" onclick="addHolding()">+ Add Holding</button>
     <button class="btn btn-ghost" style="color:#6d3fa0;border-color:#6d3fa0;" onclick="scanNewHolding()"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="3.5" width="11" height="8" rx="1.5"/><circle cx="7" cy="7.5" r="2.2"/><rect x="4.5" y="2" width="5" height="2" rx="0.3"/></svg>Scan</button>
   </div>
   <div id="holdings-list">
@@ -1016,10 +1149,18 @@ body { padding-top: var(--ckg-strip-h) !important; }
       <div class="card-sub">Weighted avg returns across periods vs common benchmarks</div>
       <div class="chart-box" style="height:220px;"><canvas id="chart-benchmark"></canvas></div>
     </div>
-    <div class="card">
-      <div class="card-title">Risk-Return Map</div>
-      <div class="card-sub">Each holding by risk score vs return estimate</div>
-      <div class="chart-box" style="height:220px;"><canvas id="chart-riskreturn"></canvas></div>
+    <div class="card" style="display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(135deg,#ffffff 0%,#faf6ef 100%);border-left:3px solid var(--teal);cursor:pointer;" onclick="showPage('frontier')">
+      <div>
+        <div class="card-title">Risk-Reward Map</div>
+        <div class="card-sub">Where your portfolio sits on the efficient frontier — full chart, plain-English narrative, proposed-move overlay</div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:14px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-teal" id="perf-pos-chip">—</span>
+          <span class="badge badge-grey" id="perf-actual-chip">—</span>
+        </div>
+        <button class="btn btn-teal btn-sm" onclick="event.stopPropagation();showPage('frontier')">Open Frontier →</button>
+      </div>
     </div>
   </div>
 
@@ -1028,7 +1169,7 @@ body { padding-top: var(--ckg-strip-h) !important; }
     <div class="card-sub">Individual holding returns with data coverage</div>
     <div class="tbl-wrap">
       <table>
-        <thead><tr>
+        <thead id="perf-table-head"><tr>
           <th>Holding</th><th>Type</th><th class="td-num">Value</th>
           <th class="td-num">Weight</th><th class="td-num">1Y %</th>
           <th class="td-num">3Y %</th><th class="td-num">5Y %</th><th class="td-num">10Y %</th>
@@ -1038,6 +1179,83 @@ body { padding-top: var(--ckg-strip-h) !important; }
           <tr><td colspan="11" class="empty">No data yet.</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     PAGE: EFFICIENT FRONTIER
+═══════════════════════════════════════════ -->
+<div id="page-frontier" class="page">
+
+  <!-- Plain-English headline + profile-vs-actual chip -->
+  <div class="card frontier-headline-card" style="margin-bottom:14px;border-left:3px solid var(--teal);">
+    <div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:220px;">
+        <div style="font-size:10.5px;font-weight:700;color:var(--teal);text-transform:uppercase;letter-spacing:1.1px;margin-bottom:6px;">Where you sit on the risk-reward curve</div>
+        <div id="frontier-headline" style="font-size:15px;line-height:1.6;color:var(--ink);font-family:'Newsreader','Playfair Display',serif;">Add holdings to see where your portfolio sits.</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;min-width:180px;">
+        <div>
+          <div style="font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:2px;">Stated profile</div>
+          <div id="frontier-stated" style="font-size:13px;font-weight:600;color:var(--ink);">—</div>
+        </div>
+        <div>
+          <div style="font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:2px;">Actual portfolio risk</div>
+          <div id="frontier-actual" style="font-size:13px;font-weight:600;color:var(--ink);">—</div>
+        </div>
+        <div id="frontier-alignment-chip" style="margin-top:2px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Full-width frontier chart -->
+  <div class="card" style="margin-bottom:14px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+      <div>
+        <div class="card-title" style="margin-bottom:2px;">Efficient Frontier</div>
+        <div class="card-sub" style="margin:0;">Michaud resampled · JPM LTCMA 2024 · ±1σ confidence band</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <label style="font-size:11px;color:var(--muted);white-space:nowrap;">Proposed move:</label>
+        <select id="frontier-proposed-mode" class="input" style="width:auto;padding:5px 9px;font-size:11.5px;" onchange="renderFrontier()">
+          <option value="sim" selected>Add diversifying ILP (from Simulator)</option>
+          <option value="bal">Rebalance to Balanced model</option>
+          <option value="grw">Rebalance to Growth model</option>
+          <option value="off">— none —</option>
+        </select>
+      </div>
+    </div>
+    <div class="chart-box" id="frontier-chart-box" style="height:480px;position:relative;"><canvas id="chart-frontier"></canvas></div>
+
+    <!-- Legend strip -->
+    <div id="frontier-legend" style="display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:11.5px;color:var(--ink);">
+      <div style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#d6a87a;border:2px solid #fff;box-shadow:0 0 0 2px #d6a87a;"></span><strong>Your portfolio</strong></div>
+      <div style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:rgba(11,107,92,0.55);border:1.5px solid rgba(11,107,92,0.9);"></span>Individual holdings</div>
+      <div id="frontier-proposed-legend" style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:rgba(109,63,160,0.18);border:2px dashed #6d3fa0;"></span>Proposed (after move)</div>
+      <div style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:18px;height:0;border-top:2.5px dashed rgba(26,86,219,0.7);"></span>Efficient frontier</div>
+      <div style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:transparent;border:1.2px solid #999;"></span>Reference (Conservative · Balanced · Growth)</div>
+    </div>
+  </div>
+
+  <!-- Holdings table + talking points -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">Holdings on the map</div>
+      <div class="card-sub">Each labelled bubble's position on the chart</div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th style="width:32px;">#</th><th>Holding</th><th class="td-num">Risk</th><th class="td-num">Est. Return</th><th class="td-num">Weight</th>
+          </tr></thead>
+          <tbody id="frontier-holdings-body"><tr><td colspan="5" class="empty">No data.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Talking points</div>
+      <div class="card-sub">Plain-English narrative for your meeting</div>
+      <div id="frontier-talkingpoints" style="font-size:12.5px;line-height:1.65;color:var(--ink);"><div class="empty" style="padding:14px;">Add holdings to generate talking points.</div></div>
     </div>
   </div>
 </div>
@@ -5399,7 +5617,8 @@ function safeRender(fn) {
 var PAGE_META = {
   overview:    ['Portfolio Overview', 'All holdings · asset class · region · performance'],
   holdings:    ['Holdings Register', 'Add and manage individual funds, stocks and instruments'],
-  performance: ['Performance Analytics', 'Weighted returns · benchmark comparison · risk-return map'],
+  performance: ['Performance', 'Weighted returns · benchmark comparison · historical data'],
+  frontier:    ['Efficient Frontier', 'Risk-reward map · Markowitz frontier · proposed moves'],
   projection:  ['Projection Modeller', 'Future value with contributions and return scenarios'],
   compare:     ['Fund Comparison', 'Side-by-side analysis of up to three holdings'],
   health:      ['Portfolio Health', 'Diversification · concentration · fees · insights'],
@@ -5478,6 +5697,7 @@ function showPage(id) {
   window.scrollTo(0, 0);
   if (id === 'overview')    safeRender(renderOverview);
   if (id === 'performance') safeRender(renderPerformance);
+  if (id === 'frontier')    safeRender(renderFrontier);
   if (id === 'projection')  { safeRender(renderStrategyPage); safeRender(renderProjection); }
   if (id === 'compare')     safeRender(renderCompareSelects);
   if (id === 'health')      safeRender(renderHealth);
@@ -5535,6 +5755,18 @@ function toggleHolding(id) {
   var h = holdings.find(function(h){ return h.id===id; });
   if (h) h._open = !h._open;
   renderHoldings();
+}
+
+// Click anywhere on the row header (except input and buttons) toggles the row open/closed.
+// The input and buttons stop propagation, so this only fires when the user clicks the gutter
+// or the pill area — making the WHOLE row card feel clickable as an "open" affordance.
+function _hRowHeaderClick(e, id) {
+  if (!e || !id) return;
+  var t = e.target;
+  // If the click reached an interactive descendant (input, button, select), it would have
+  // stopped propagation; double-check anyway in case of bubbling weirdness.
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  toggleHolding(id);
 }
 
 function updateHolding(id, field, value) {
@@ -5761,16 +5993,16 @@ function renderHoldings() {
     }
 
     return '<div class="holding-row" id="hrow-'+h.id+'" style="'+(isILP?'border-color:rgba(109,63,160,0.3);border-left:3px solid var(--purple);':'') +'">'
-      // Header
-      +'<div class="holding-row-header">'
+      // Header (click anywhere except input/buttons to expand)
+      +'<div class="holding-row-header" data-holding-id="'+h.id+'" onclick="_hRowHeaderClick(event, \''+h.id+'\')">'
         +'<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;overflow:hidden;">'
           +'<span class="holding-type-pill type-'+h.type+'" style="flex-shrink:0;">'+typeInfo.label+'</span>'
-          +'<input value="'+escHtml(h.name)+'" style="border:none;background:transparent;font-weight:600;font-size:14px;font-family:\'Newsreader\',\'Playfair Display\',serif;flex:1;min-width:0;width:100%;" onfocus="if(this.value===\'New Holding\')this.select();" oninput="updateHolding(\''+h.id+'\',\'name\',this.value)">'
+          +'<input value="'+escHtml(h.name)+'" data-hname="1" title="Click to rename" style="border:none;background:transparent;font-weight:600;font-size:14px;font-family:\'Newsreader\',\'Playfair Display\',serif;flex:1;min-width:0;width:100%;cursor:text;" onfocus="if(this.value===\'New Holding\')this.select();" oninput="updateHolding(\''+h.id+'\',\'name\',this.value)" onclick="event.stopPropagation()">'
         +'</div>'
-        +'<div style="display:flex;align-items:center;gap:5px;flex-shrink:0;">'
+        +'<div style="display:flex;align-items:center;gap:5px;flex-shrink:0;" onclick="event.stopPropagation()">'
           +(isILP && !open ? '<span style="font-size:10px;color:var(--purple);font-weight:500;">'+ilpFundsSummary+'</span>' : '')
           +(h.value>0?'<span style="font-family:\'IBM Plex Mono\',monospace;font-size:11.5px;font-weight:600;color:'+(isILP?'var(--purple)':'var(--teal)')+';">'+fmtSGD(h.value)+'</span>':'')
-          +'<button onclick="toggleHolding(\''+h.id+'\')" style="background:rgba(0,0,0,0.06);border:none;border-radius:5px;padding:5px 9px;font-size:11px;cursor:pointer;color:var(--muted);font-weight:600;white-space:nowrap;min-height:32px;flex-shrink:0;">'+(open?'▲':'✏')+'</button>'
+          +'<button onclick="toggleHolding(\''+h.id+'\')" title="'+(open?'Collapse':'Expand details')+'" style="background:rgba(0,0,0,0.06);border:none;border-radius:5px;padding:5px 9px;font-size:11px;cursor:pointer;color:var(--muted);font-weight:600;white-space:nowrap;min-height:32px;flex-shrink:0;">'+(open?'▲':'▼')+'</button>'
           +'<button onclick="scanHolding(\''+h.id+'\')" style="background:rgba(109,63,160,0.08);border:none;border-radius:5px;padding:5px 8px;color:#6d3fa0;cursor:pointer;font-size:11px;font-weight:600;min-height:32px;flex-shrink:0;" title="Scan document / photo">📷</button>'
           +(!isILP ? '<button onclick="window.open(\'https://www.google.com/search?q=\'+encodeURIComponent(\''+escHtml(h.name)+' SGD fund factsheet\'),\'_blank\')" style="background:rgba(26,86,219,0.08);border:none;border-radius:5px;padding:5px 8px;color:#1a56db;cursor:pointer;font-size:11px;font-weight:600;min-height:32px;flex-shrink:0;" title="Search factsheet on Google">📄</button>' : '')
           +'<button onclick="removeHolding(\''+h.id+'\')" style="background:var(--coral-light);border:none;border-radius:5px;padding:5px 8px;color:var(--coral);cursor:pointer;font-size:13px;font-weight:700;min-height:32px;flex-shrink:0;">✕</button>'
@@ -6454,6 +6686,7 @@ function updateKPIs() {
 
 function renderOverview() {
   updateKPIs();
+  renderAlignmentBanner();
   var tot = totalValue();
   // Composition strip
   var strip = document.getElementById('comp-strip');
@@ -6757,7 +6990,505 @@ function renderPerformance() {
       +'<td class="td-num '+(net!=null?(net>=0?'td-pos':'td-neg'):'')+'">'+fmtRet(net)+'</td>'
     +'</tr>';
   }).join('');
+
+  // Hide 1Y/3Y/5Y/10Y columns if all rows are empty (no historical data coverage)
+  try {
+    var emptyHist = !sorted.some(function(h){
+      return h.hist1y!=null || h.hist3y!=null || h.hist5y!=null || h.hist10y!=null;
+    });
+    var head = document.getElementById('perf-table-head');
+    var body = document.getElementById('perf-table-body');
+    if (head && body) {
+      var thIdx = [4,5,6,7];
+      var headThs = head.querySelectorAll('th');
+      thIdx.forEach(function(i){ if (headThs[i]) headThs[i].style.display = emptyHist ? 'none' : ''; });
+      Array.prototype.forEach.call(body.querySelectorAll('tr'), function(tr){
+        var tds = tr.querySelectorAll('td');
+        thIdx.forEach(function(i){ if (tds[i]) tds[i].style.display = emptyHist ? 'none' : ''; });
+      });
+    }
+  } catch(e){}
+
+  // Update the Performance-page CTA chips that point to the Frontier page
+  try {
+    var pr = calcPortfolioRisk();
+    var wrc = weightedReturn(null);
+    var efc = calcResampledFrontier();
+    var posChip = document.getElementById('perf-pos-chip');
+    var actChip = document.getElementById('perf-actual-chip');
+    if (pr && wrc && posChip && actChip) {
+      var efRetC = efc.mean[Math.min(9, Math.max(0, pr.score-1))];
+      var gapC = wrc.val - efRetC;
+      var label = gapC > 1 ? 'Above frontier' : gapC > -1 ? 'On the frontier' : 'Below frontier';
+      var cls = gapC > 1 ? 'badge-teal' : gapC > -1 ? 'badge-blue' : 'badge-amber';
+      posChip.textContent = label;
+      posChip.className = 'badge ' + cls;
+      actChip.textContent = 'R' + pr.score + ' · ' + wrc.val.toFixed(1) + '% p.a.';
+    }
+  } catch(e){}
 }
+
+// ══════════════════════════════════════════════════
+//  PRESENT MODE + ONE-PAGER PRINT (Patch E)
+// ══════════════════════════════════════════════════
+function togglePresentMode() {
+  var on = document.body.classList.toggle('present-mode');
+  // When entering Present mode, jump to the Frontier page — that's the meeting view
+  if (on) {
+    if (typeof showPage === 'function') showPage('frontier');
+    // Resize charts after a tick so they pick up the new container size
+    setTimeout(function(){
+      Object.keys(charts || {}).forEach(function(k){ try { charts[k].resize(); } catch(e){} });
+    }, 60);
+  } else {
+    setTimeout(function(){
+      Object.keys(charts || {}).forEach(function(k){ try { charts[k].resize(); } catch(e){} });
+    }, 60);
+  }
+}
+
+// Escape exits present mode
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape' && document.body.classList.contains('present-mode')) {
+    togglePresentMode();
+  }
+});
+
+// One-pager: tag body for print-only CSS, route browser print, then untag
+function printOnePager() {
+  // Ensure the Frontier page is rendered first
+  if (typeof showPage === 'function') showPage('frontier');
+  setTimeout(function(){
+    document.body.classList.add('print-onepager');
+    // Resize chart for print canvas
+    if (charts && charts['chart-frontier']) { try { charts['chart-frontier'].resize(); } catch(e){} }
+    setTimeout(function(){
+      window.print();
+      // Cleanup happens after the print dialog returns
+      setTimeout(function(){
+        document.body.classList.remove('print-onepager');
+        if (charts && charts['chart-frontier']) { try { charts['chart-frontier'].resize(); } catch(e){} }
+      }, 500);
+    }, 250);
+  }, 200);
+}
+
+// ══════════════════════════════════════════════════
+//  STATED-PROFILE ALIGNMENT BANNER (Patch C)
+// ══════════════════════════════════════════════════
+function renderAlignmentBanner() {
+  var b = document.getElementById('profile-alignment-banner');
+  if (!b) return;
+  if (!holdings || !holdings.length) { b.style.display = 'none'; return; }
+
+  var pr = (typeof calcPortfolioRisk === 'function') ? calcPortfolioRisk() : null;
+  if (!pr || pr.score == null) { b.style.display = 'none'; return; }
+
+  var statedRaw = (document.getElementById('ci-risk')||{}).value || (clientInfo && clientInfo.riskProfile) || 'moderate';
+  var statedRiskMap = { conservative:[1,3], moderate:[3,5], balanced:[4,5], growth:[6,7], aggressive:[7,9] };
+  var band = statedRiskMap[statedRaw] || [3,5];
+  var stated = statedRaw.charAt(0).toUpperCase() + statedRaw.slice(1);
+  var actual = pr.score;
+
+  document.getElementById('ab-stated').textContent = stated + ' (R' + band[0] + '–' + band[1] + ')';
+  document.getElementById('ab-actual').textContent = 'R' + actual + ' / 10';
+
+  var chip = document.getElementById('ab-chip');
+  if (actual < band[0] - 1 || actual > band[1] + 1) {
+    chip.innerHTML = '<span class="frontier-chip miss">⚠ Misaligned</span>';
+    b.style.borderLeftColor = 'var(--coral)';
+  } else if (actual < band[0] || actual > band[1]) {
+    chip.innerHTML = '<span class="frontier-chip gap">~ Edge of band</span>';
+    b.style.borderLeftColor = 'var(--amber)';
+  } else {
+    chip.innerHTML = '<span class="frontier-chip match">✓ Aligned</span>';
+    b.style.borderLeftColor = 'var(--teal)';
+  }
+  b.style.display = '';
+}
+
+// Re-render banner if the risk-profile dropdown changes
+document.addEventListener('change', function(e){
+  if (e.target && e.target.id === 'ci-risk') renderAlignmentBanner();
+});
+
+// ══════════════════════════════════════════════════
+//  EFFICIENT FRONTIER PAGE (Patch A)
+// ══════════════════════════════════════════════════
+
+// Chart.js plugin: regime bands behind the chart area (Conservative / Balanced / Growth / Aggressive)
+var _frontierBandsPlugin = {
+  id: 'frontierBands',
+  beforeDatasetsDraw: function(chart) {
+    var xs = chart.scales.x, ys = chart.scales.y;
+    if (!xs || !ys) return;
+    var ctx = chart.ctx;
+    var top = ys.top, bot = ys.bottom;
+    var bands = [
+      { from: 0.5, to: 3.5, fill: 'rgba(11,107,92,0.04)',  label: 'Conservative' },
+      { from: 3.5, to: 5.5, fill: 'rgba(26,86,219,0.04)',  label: 'Balanced' },
+      { from: 5.5, to: 7.5, fill: 'rgba(200,130,10,0.05)', label: 'Growth' },
+      { from: 7.5, to: 10.5,fill: 'rgba(192,57,43,0.05)',  label: 'Aggressive' }
+    ];
+    ctx.save();
+    bands.forEach(function(b){
+      var x1 = xs.getPixelForValue(b.from), x2 = xs.getPixelForValue(b.to);
+      ctx.fillStyle = b.fill;
+      ctx.fillRect(x1, top, x2 - x1, bot - top);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.font = '500 8.5px "IBM Plex Sans", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(b.label.toUpperCase(), (x1+x2)/2, top + 10);
+    });
+    ctx.restore();
+  }
+};
+
+// Chart.js plugin: labels for individual holding bubbles
+function _makeFrontierLabelsPlugin(getLabels) {
+  return {
+    id: 'frontierLabels' + Date.now(),
+    afterDatasetsDraw: function(chart) {
+      var ctx = chart.ctx;
+      var labels = (getLabels && getLabels()) || [];
+      ctx.save();
+      ctx.font = '600 10px "IBM Plex Sans", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(15,18,24,0.78)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 3;
+      ctx.textBaseline = 'middle';
+      labels.forEach(function(l) {
+        var xs = chart.scales.x, ys = chart.scales.y;
+        var px = xs.getPixelForValue(l.x), py = ys.getPixelForValue(l.y);
+        var txt = l.text;
+        if (txt.length > 22) txt = txt.slice(0, 20) + '…';
+        ctx.textAlign = l.x >= 6 ? 'right' : 'left';
+        var dx = l.x >= 6 ? -(l.r||8) - 6 : (l.r||8) + 6;
+        if (l.bold) {
+          ctx.font = '700 12px "IBM Plex Sans", system-ui, sans-serif';
+          ctx.fillStyle = '#8a5a2e';
+        } else if (l.accent) {
+          ctx.font = '600 11px "IBM Plex Sans", system-ui, sans-serif';
+          ctx.fillStyle = '#5a3287';
+        } else {
+          ctx.font = '600 10px "IBM Plex Sans", system-ui, sans-serif';
+          ctx.fillStyle = 'rgba(15,18,24,0.78)';
+        }
+        ctx.strokeText(txt, px + dx, py);
+        ctx.fillText(txt, px + dx, py);
+      });
+      ctx.restore();
+    }
+  };
+}
+
+// Chart.js plugin: arrow from current → proposed dot
+function _makeFrontierArrowPlugin(getEndpoints) {
+  return {
+    id: 'frontierArrow' + Date.now(),
+    afterDatasetsDraw: function(chart) {
+      var ep = getEndpoints && getEndpoints();
+      if (!ep || ep.from == null || ep.to == null) return;
+      var xs = chart.scales.x, ys = chart.scales.y;
+      var x1 = xs.getPixelForValue(ep.from.x), y1 = ys.getPixelForValue(ep.from.y);
+      var x2 = xs.getPixelForValue(ep.to.x),   y2 = ys.getPixelForValue(ep.to.y);
+      var ctx = chart.ctx;
+      ctx.save();
+      // Shorten arrow so it doesn't enter the dots
+      var dx = x2-x1, dy = y2-y1;
+      var len = Math.sqrt(dx*dx + dy*dy);
+      if (len < 18) { ctx.restore(); return; }
+      var pad = 14;
+      var sx = x1 + (dx/len)*pad, sy = y1 + (dy/len)*pad;
+      var ex = x2 - (dx/len)*pad, ey = y2 - (dy/len)*pad;
+      ctx.strokeStyle = 'rgba(109,63,160,0.72)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5,4]);
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.setLineDash([]);
+      // Arrowhead
+      var ang = Math.atan2(ey-sy, ex-sx);
+      ctx.fillStyle = 'rgba(109,63,160,0.85)';
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - 9*Math.cos(ang - Math.PI/7), ey - 9*Math.sin(ang - Math.PI/7));
+      ctx.lineTo(ex - 9*Math.cos(ang + Math.PI/7), ey - 9*Math.sin(ang + Math.PI/7));
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+    }
+  };
+}
+
+function _frontierPlainEnglish(portRisk, portReturn, efReturn, divRatio, nEff, stated) {
+  var gap = portReturn - efReturn;
+  var risklbl = portRisk <= 3 ? 'conservative' : portRisk <= 5 ? 'balanced' : portRisk <= 7 ? 'growth-oriented' : 'aggressive';
+  var leadr = '';
+  if (gap > 1.5)      leadr = 'You\'re earning <strong>more return than a textbook portfolio at your risk level</strong>';
+  else if (gap > 0)   leadr = 'Your portfolio is <strong>on the efficient frontier</strong> for its risk level';
+  else if (gap > -1.5) leadr = 'Your portfolio is <strong>close to but slightly below</strong> the efficient frontier';
+  else                leadr = 'Your portfolio is <strong>noticeably below</strong> the efficient frontier — you\'re taking risk without commensurate return';
+
+  var head = leadr + ' (' + portReturn.toFixed(1) + '% vs benchmark ' + efReturn.toFixed(1) + '%).';
+  if (gap > 1.5) head += ' That outperformance is real but typically concentrated — diversifying can lock in some of it as repeatable.';
+  if (nEff != null && nEff < 3.5) head += ' The portfolio leans heavily on ' + nEff.toFixed(1) + ' effective holdings, so spreading risk is the natural next step.';
+  return head;
+}
+
+function _frontierTalkingPoints(pr, wr, ef, props) {
+  var port = pr ? pr.score : null;
+  var efRet = (port && ef && ef.mean) ? ef.mean[Math.min(9, Math.max(0, port-1))] : null;
+  var pts = [];
+  if (port && wr && efRet != null) {
+    var gap = wr.val - efRet;
+    if (gap > 1.5) pts.push({ t:'Position', b:'At risk level R'+port+', you target <strong>'+wr.val.toFixed(1)+'% p.a.</strong> versus the model frontier\'s <strong>'+efRet.toFixed(1)+'%</strong>. Above-frontier returns are achievable but often come from concentration or active picks — verify durability.' });
+    else if (gap > 0)      pts.push({ t:'Position', b:'Portfolio return of <strong>'+wr.val.toFixed(1)+'%</strong> sits near the frontier ('+efRet.toFixed(1)+'%) for R'+port+'. Solid balance of risk and reward.' });
+    else if (gap > -1.5)   pts.push({ t:'Position', b:'You\'re tracking <strong>'+Math.abs(gap).toFixed(1)+'% below</strong> the R'+port+' frontier ('+efRet.toFixed(1)+'%). Often explained by fees or conservative estimates.' });
+    else                   pts.push({ t:'Position', b:'You\'re <strong>'+Math.abs(gap).toFixed(1)+'% below</strong> the frontier at R'+port+'. The portfolio is bearing risk without proportional reward — worth a rebalance conversation.' });
+  }
+  if (pr) {
+    if (pr.divRatio > 1.3) pts.push({ t:'Diversification', b:'Strong cross-asset diversification (ratio '+pr.divRatio.toFixed(2)+'×). Bonds and equities are working together.' });
+    else if (pr.divRatio > 1.1) pts.push({ t:'Diversification', b:'Moderate diversification (ratio '+pr.divRatio.toFixed(2)+'×). Adding govt bonds or alternative assets could lower risk without giving up return.' });
+    else                pts.push({ t:'Diversification', b:'Limited diversification (ratio '+pr.divRatio.toFixed(2)+'×). Holdings are highly correlated — fixed income or alternatives would help.' });
+    if (pr.nEffective < 3) pts.push({ t:'Concentration', b:'<strong>'+pr.nEffective.toFixed(1)+' effective holdings.</strong> Single-position risk is elevated — one bad name swings the whole book.' });
+  }
+  if (props && props.from && props.to) {
+    var dx = (props.to.x - props.from.x);
+    var dy = (props.to.y - props.from.y);
+    var moveDesc = dx < -0.15 ? 'lower risk' : dx > 0.15 ? 'higher risk' : 'similar risk';
+    var retDesc = dy >= 0 ? '+'+dy.toFixed(2)+'% return' : dy.toFixed(2)+'% return';
+    pts.push({ t:'Proposed move', b:'The dashed arrow shows where the portfolio would land after the proposed move — <strong>'+moveDesc+', '+retDesc+'</strong>. That\'s the talking point for diversification — same money, better-shaped curve.' });
+  }
+  return pts;
+}
+
+var _chartFrontierLabelData = [];
+var _chartFrontierArrowData = null;
+
+function renderFrontier() {
+  var hl = document.getElementById('frontier-headline');
+  var stEl = document.getElementById('frontier-stated');
+  var actEl = document.getElementById('frontier-actual');
+  var chipEl = document.getElementById('frontier-alignment-chip');
+  var holdingsBody = document.getElementById('frontier-holdings-body');
+  var tpEl = document.getElementById('frontier-talkingpoints');
+
+  var all = getAllAnalysisHoldings();
+  var withRet = all.filter(function(h){ return bestReturn(h) != null; });
+
+  if (!withRet.length) {
+    hl.innerHTML = 'Add holdings with estimated returns to see where you sit.';
+    if (holdingsBody) holdingsBody.innerHTML = '<tr><td colspan="5" class="empty">No data.</td></tr>';
+    if (tpEl) tpEl.innerHTML = '<div class="empty" style="padding:14px;">Add holdings to generate talking points.</div>';
+    destroyChart('chart-frontier');
+    return;
+  }
+
+  var pr = calcPortfolioRisk();
+  var wr = weightedReturn(null);
+  var ef = calcResampledFrontier();
+  var portRisk = pr ? pr.score : 5;
+  var portReturn = wr ? wr.val : 0;
+  var efReturn = ef.mean[Math.min(9, Math.max(0, portRisk-1))];
+
+  // Stated profile from Client Info dropdown
+  var statedRaw = (document.getElementById('ci-risk')||{}).value || 'moderate';
+  var statedRiskMap = { conservative:[1,3], moderate:[3,5], balanced:[4,5], growth:[6,7], aggressive:[7,9] };
+  var statedBand = statedRiskMap[statedRaw];
+  var stated = statedRaw ? statedRaw.charAt(0).toUpperCase() + statedRaw.slice(1) : '—';
+
+  if (stEl) stEl.textContent = stated;
+  if (actEl) actEl.textContent = 'R' + portRisk + ' / 10';
+
+  if (chipEl) {
+    if (statedBand && (portRisk < statedBand[0] - 1 || portRisk > statedBand[1] + 1)) {
+      chipEl.innerHTML = '<span class="frontier-chip miss">⚠ Misaligned · ' + (portRisk < statedBand[0] ? 'under-risked' : 'over-risked') + '</span>';
+    } else if (statedBand && (portRisk < statedBand[0] || portRisk > statedBand[1])) {
+      chipEl.innerHTML = '<span class="frontier-chip gap">~ Edge of band</span>';
+    } else if (statedBand) {
+      chipEl.innerHTML = '<span class="frontier-chip match">✓ Aligned</span>';
+    } else {
+      chipEl.innerHTML = '';
+    }
+  }
+
+  if (hl) hl.innerHTML = _frontierPlainEnglish(portRisk, portReturn, efReturn, pr ? pr.divRatio : 1, pr ? pr.nEffective : 0, stated);
+
+  // ── Build chart datasets ──
+  var holdingData = withRet.map(function(h){
+    var v = h.value || 0;
+    return { x: h.risk || 5, y: bestReturn(h), r: Math.max(6, Math.min(22, Math.sqrt(v/4000))), label: h.name, value: v };
+  });
+
+  var efPoints   = ef.mean.map(function(v,i){return {x:i+1, y:v};});
+  var efHiPoints = ef.hi.map(function(v,i){return {x:i+1, y:v};});
+  var efLoPoints = ef.lo.map(function(v,i){return {x:i+1, y:v};});
+
+  // Reference model portfolios sit ON the frontier mean
+  var refPoints = [
+    { x: 3, y: ef.mean[2], label: 'Conservative' },
+    { x: 5, y: ef.mean[4], label: 'Balanced' },
+    { x: 7, y: ef.mean[6], label: 'Growth' }
+  ];
+
+  // Aggregate "You are here" dot (single point dataset)
+  var youDot = [{ x: portRisk, y: portReturn, label: 'Your portfolio' }];
+
+  // Proposed dot based on dropdown
+  var mode = (document.getElementById('frontier-proposed-mode')||{}).value || 'sim';
+  var proposed = null;
+  if (mode === 'sim') {
+    try {
+      var ilpCV = parseFloat((document.getElementById('sim-ilp-cv')||{}).value)||50000;
+      var bondPct = parseFloat((document.getElementById('sim-ilp-bond')||{}).value)||40;
+      var eqPct = parseFloat((document.getElementById('sim-ilp-eq')||{}).value)||35;
+      var altPct = parseFloat((document.getElementById('sim-ilp-alt')||{}).value)||25;
+      var simFunds = [];
+      if (bondPct > 0) simFunds.push({name:'Bond/FI', value:Math.round(ilpCV*bondPct/100), risk:3, assetClass:'bond',  region:'global', sector:'bonds_fi',   histAvg:3.5});
+      if (eqPct > 0)   simFunds.push({name:'Global Equity', value:Math.round(ilpCV*eqPct/100), risk:6, assetClass:'equity',region:'global', sector:'multi_sector',histAvg:7.5});
+      if (altPct > 0)  simFunds.push({name:'Multi-Asset',  value:Math.round(ilpCV*altPct/100), risk:4, assetClass:'mixed', region:'global', sector:'multi_sector',histAvg:5.5});
+      var combined = all.concat(simFunds);
+      var mAfter = calcPortfolioRiskMetrics(combined);
+      // Aggregate after-state return = weighted mean of estimated returns over the combined set
+      var totV = combined.reduce(function(s,h){return s+(h.value||0);},0);
+      var afterRet = 0;
+      combined.forEach(function(h){
+        var r = bestReturn(h);
+        if (r != null && totV > 0) afterRet += r * ((h.value||0)/totV);
+      });
+      proposed = { x: mAfter ? mAfter.wRisk : portRisk, y: afterRet || portReturn, label:'After ILP' };
+    } catch(e){}
+  } else if (mode === 'bal') {
+    proposed = { x: 5, y: ef.mean[4], label:'Balanced model' };
+  } else if (mode === 'grw') {
+    proposed = { x: 7, y: ef.mean[6], label:'Growth model' };
+  }
+
+  // Stash data the plugins will read
+  _chartFrontierLabelData = holdingData.map(function(d){
+    var label = d.label.length > 18 ? d.label.slice(0, 16) + '…' : d.label;
+    return { x: d.x, y: d.y, r: d.r, text: label };
+  });
+  _chartFrontierLabelData.push({ x: portRisk, y: portReturn, r: 14, text: 'You', bold: true });
+  // Reference dots are explained in the legend strip below — skip in-chart labels to avoid clashing with regime band labels
+  if (proposed) _chartFrontierLabelData.push({ x: proposed.x, y: proposed.y, r: 11, text: proposed.label, accent: true });
+
+  _chartFrontierArrowData = proposed ? { from: { x: portRisk, y: portReturn }, to: { x: proposed.x, y: proposed.y } } : null;
+
+  destroyChart('chart-frontier');
+  var canvas = document.getElementById('chart-frontier');
+  if (!canvas) return;
+
+  var labelsPlugin = _makeFrontierLabelsPlugin(function(){ return _chartFrontierLabelData; });
+  var arrowPlugin  = _makeFrontierArrowPlugin(function(){ return _chartFrontierArrowData; });
+
+  var datasets = [
+    // Frontier 1σ upper boundary (drawn first so it sits behind everything)
+    { label:'Frontier upper σ', type:'line', data: efHiPoints,
+      borderColor:'rgba(26,86,219,0.10)', borderWidth:1, pointRadius:0,
+      fill:'+1', backgroundColor:'rgba(26,86,219,0.06)', tension:0.4 },
+    { label:'Frontier lower σ', type:'line', data: efLoPoints,
+      borderColor:'rgba(26,86,219,0.10)', borderWidth:1, pointRadius:0, fill:false, tension:0.4 },
+    { label:'Frontier (mean)', type:'line', data: efPoints,
+      borderColor:'rgba(26,86,219,0.65)', borderWidth:2.5, borderDash:[6,4],
+      pointRadius:0, fill:false, tension:0.4 },
+    // Reference ghost dots
+    { label:'Reference', type:'bubble',
+      data: refPoints.map(function(p){ return { x:p.x, y:p.y, r:6 }; }),
+      backgroundColor:'rgba(255,255,255,0.6)',
+      borderColor:'rgba(120,120,120,0.7)', borderWidth:1.2 },
+    // Individual holdings (size by value)
+    { label:'Holdings', type:'bubble',
+      data: holdingData.map(function(d){ return { x:d.x, y:d.y, r:d.r }; }),
+      backgroundColor:'rgba(11,107,92,0.55)',
+      borderColor:'rgba(11,107,92,0.95)', borderWidth:1.5 },
+    // Aggregate "You" dot
+    { label:'Your portfolio', type:'bubble',
+      data: [{ x: portRisk, y: portReturn, r: 13 }],
+      backgroundColor:'#d6a87a',
+      borderColor:'#ffffff', borderWidth:3,
+      hoverBorderWidth:3 }
+  ];
+
+  if (proposed) {
+    datasets.push({
+      label:'Proposed', type:'bubble',
+      data: [{ x: proposed.x, y: proposed.y, r: 11 }],
+      backgroundColor:'rgba(109,63,160,0.18)',
+      borderColor:'#6d3fa0', borderWidth:2,
+      borderDash:[4,3]
+    });
+  }
+
+  charts['chart-frontier'] = safeChart(canvas, {
+    type:'bubble',
+    data:{ datasets: datasets },
+    plugins:[ _frontierBandsPlugin, labelsPlugin, arrowPlugin ],
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      animation: { duration: 350 },
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          callbacks:{
+            label:function(c){
+              var ds = c.dataset.label;
+              if (ds === 'Holdings') {
+                var d = holdingData[c.dataIndex];
+                return d ? [d.label, 'Risk: '+d.x.toFixed(1), 'Return: '+d.y.toFixed(2)+'% p.a.', 'Value: '+fmtSGD(d.value)] : '';
+              }
+              if (ds === 'Your portfolio') return ['Your portfolio', 'Risk: R'+portRisk, 'Return: '+portReturn.toFixed(2)+'% p.a.'];
+              if (ds === 'Proposed' && proposed) return [proposed.label, 'Risk: R'+proposed.x.toFixed(1), 'Return: '+proposed.y.toFixed(2)+'% p.a.'];
+              if (ds === 'Reference') { var p = refPoints[c.dataIndex]; return p ? [p.label, 'Risk: R'+p.x, 'Return: '+p.y.toFixed(2)+'%'] : ''; }
+              if (ds && ds.indexOf('Frontier') === 0) return ['Efficient frontier', 'Risk: R'+c.parsed.x, 'Return: '+c.parsed.y.toFixed(2)+'% p.a.'];
+              return '';
+            }
+          }
+        }
+      },
+      scales:{
+        x:{ title:{display:true, text:'Risk Level (1 = Conservative · 10 = Speculative)', font:{size:11, family:'IBM Plex Sans', weight:'500'}},
+            min:0.5, max:10.5,
+            ticks:{ stepSize:1, color:'rgba(0,0,0,0.55)' },
+            grid:{color:'rgba(0,0,0,0.04)'} },
+        y:{ title:{display:true, text:'Estimated Return (% p.a.)', font:{size:11, family:'IBM Plex Sans', weight:'500'}},
+            ticks:{callback:function(v){return v+'%';}, color:'rgba(0,0,0,0.55)'},
+            grid:{color:'rgba(0,0,0,0.04)'} }
+      }
+    }
+  });
+
+  // ── Holdings table ──
+  if (holdingsBody) {
+    var totV = withRet.reduce(function(s,h){ return s+(h.value||0); }, 0);
+    holdingsBody.innerHTML = withRet.slice().sort(function(a,b){return (b.value||0)-(a.value||0);}).map(function(h, i){
+      var wt = totV > 0 ? (h.value||0)/totV*100 : 0;
+      var name = h.name + (h._fromILP ? ' <span style="font-size:9.5px;color:var(--purple);">(ILP)</span>' : '');
+      return '<tr>'
+        + '<td style="font-weight:600;color:var(--muted);">'+(i+1)+'</td>'
+        + '<td><strong>'+name+'</strong></td>'
+        + '<td class="td-num">'+(h.risk||5)+'/10</td>'
+        + '<td class="td-num td-pos">+'+bestReturn(h).toFixed(1)+'%</td>'
+        + '<td class="td-num">'+wt.toFixed(1)+'%</td>'
+      + '</tr>';
+    }).join('');
+  }
+
+  // ── Talking points ──
+  if (tpEl) {
+    var pts = _frontierTalkingPoints(pr, wr, ef, _chartFrontierArrowData);
+    if (!pts.length) tpEl.innerHTML = '<div class="empty" style="padding:14px;">No talking points generated.</div>';
+    else tpEl.innerHTML = pts.map(function(p){ return '<div class="frontier-tp"><span class="frontier-tp-title">'+p.t+'</span>'+p.b+'</div>'; }).join('');
+  }
+}
+
+// Keep frontier in sync when simulator inputs change
+window.addEventListener('input', function(e){
+  if (!e.target || !e.target.id) return;
+  if (/^sim-ilp-/.test(e.target.id)) {
+    var fp = document.getElementById('page-frontier');
+    if (fp && fp.classList.contains('active')) renderFrontier();
+  }
+});
 
 // ══════════════════════════════════════════════════
 //  PRODUCT STRATEGY BUILDER
