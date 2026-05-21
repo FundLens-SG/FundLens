@@ -1255,15 +1255,7 @@ body { padding-top: var(--ckg-strip-h) !important; }
         <div class="card-title" style="margin-bottom:2px;">Efficient Frontier</div>
         <div class="card-sub" style="margin:0;">Michaud resampled · JPM LTCMA 2024 · ±1σ confidence band</div>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        <label style="font-size:11px;color:var(--muted);white-space:nowrap;">Proposed move:</label>
-        <select id="frontier-proposed-mode" class="input" style="width:auto;padding:5px 9px;font-size:11.5px;" onchange="renderFrontier()">
-          <option value="sim" selected>Add diversifying ILP (from Simulator)</option>
-          <option value="bal">Rebalance to Balanced model</option>
-          <option value="grw">Rebalance to Growth model</option>
-          <option value="off">— none —</option>
-        </select>
-      </div>
+      <div style="font-size:11px;color:var(--muted);">Equity / Bond / ILP positioning relative to the model frontier</div>
     </div>
     <div class="chart-box" id="frontier-chart-box" style="height:480px;position:relative;"><canvas id="chart-frontier"></canvas></div>
 
@@ -1271,7 +1263,6 @@ body { padding-top: var(--ckg-strip-h) !important; }
     <div id="frontier-legend" style="display:flex;flex-wrap:wrap;gap:14px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:11.5px;color:var(--ink);">
       <div style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:#d6a87a;border:2px solid #fff;box-shadow:0 0 0 2px #d6a87a;"></span><strong>Your portfolio</strong></div>
       <div style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:rgba(11,107,92,0.55);border:1.5px solid rgba(11,107,92,0.9);"></span>Individual holdings</div>
-      <div id="frontier-proposed-legend" style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:rgba(109,63,160,0.18);border:2px dashed #6d3fa0;"></span>Proposed (after move)</div>
       <div style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:18px;height:0;border-top:2.5px dashed rgba(26,86,219,0.7);"></span>Efficient frontier</div>
       <div style="display:flex;align-items:center;gap:7px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:transparent;border:1.2px solid #999;"></span>Reference (Conservative · Balanced · Growth)</div>
     </div>
@@ -7300,13 +7291,6 @@ function _frontierTalkingPoints(pr, wr, ef, props) {
     else                pts.push({ t:'Diversification', b:'Limited diversification (ratio '+pr.divRatio.toFixed(2)+'×). Holdings are highly correlated — fixed income or alternatives would help.' });
     if (pr.nEffective < 3) pts.push({ t:'Concentration', b:'<strong>'+pr.nEffective.toFixed(1)+' effective holdings.</strong> Single-position risk is elevated — one bad name swings the whole book.' });
   }
-  if (props && props.from && props.to) {
-    var dx = (props.to.x - props.from.x);
-    var dy = (props.to.y - props.from.y);
-    var moveDesc = dx < -0.15 ? 'lower risk' : dx > 0.15 ? 'higher risk' : 'similar risk';
-    var retDesc = dy >= 0 ? '+'+dy.toFixed(2)+'% return' : dy.toFixed(2)+'% return';
-    pts.push({ t:'Proposed move', b:'The dashed arrow shows where the portfolio would land after the proposed move — <strong>'+moveDesc+', '+retDesc+'</strong>. That\'s the talking point for diversification — same money, better-shaped curve.' });
-  }
   return pts;
 }
 
@@ -7386,49 +7370,15 @@ function _renderFrontierInner() {
     { x: 7, y: ef.mean[6], label: 'Growth' }
   ];
 
-  // Aggregate "You are here" dot (single point dataset)
-  var youDot = [{ x: portRisk, y: portReturn, label: 'Your portfolio' }];
-
-  // Proposed dot based on dropdown
-  var mode = (document.getElementById('frontier-proposed-mode')||{}).value || 'sim';
-  var proposed = null;
-  if (mode === 'sim') {
-    try {
-      var ilpCV = parseFloat((document.getElementById('sim-ilp-cv')||{}).value)||50000;
-      var bondPct = parseFloat((document.getElementById('sim-ilp-bond')||{}).value)||40;
-      var eqPct = parseFloat((document.getElementById('sim-ilp-eq')||{}).value)||35;
-      var altPct = parseFloat((document.getElementById('sim-ilp-alt')||{}).value)||25;
-      var simFunds = [];
-      if (bondPct > 0) simFunds.push({name:'Bond/FI', value:Math.round(ilpCV*bondPct/100), risk:3, assetClass:'bond',  region:'global', sector:'bonds_fi',   histAvg:3.5});
-      if (eqPct > 0)   simFunds.push({name:'Global Equity', value:Math.round(ilpCV*eqPct/100), risk:6, assetClass:'equity',region:'global', sector:'multi_sector',histAvg:7.5});
-      if (altPct > 0)  simFunds.push({name:'Multi-Asset',  value:Math.round(ilpCV*altPct/100), risk:4, assetClass:'mixed', region:'global', sector:'multi_sector',histAvg:5.5});
-      var combined = all.concat(simFunds);
-      var mAfter = calcPortfolioRiskMetrics(combined);
-      // Aggregate after-state return = weighted mean of estimated returns over the combined set
-      var totV = combined.reduce(function(s,h){return s+(h.value||0);},0);
-      var afterRet = 0;
-      combined.forEach(function(h){
-        var r = bestReturn(h);
-        if (r != null && totV > 0) afterRet += r * ((h.value||0)/totV);
-      });
-      proposed = { x: mAfter ? mAfter.wRisk : portRisk, y: afterRet || portReturn, label:'After ILP' };
-    } catch(e){}
-  } else if (mode === 'bal') {
-    proposed = { x: 5, y: ef.mean[4], label:'Balanced model' };
-  } else if (mode === 'grw') {
-    proposed = { x: 7, y: ef.mean[6], label:'Growth model' };
-  }
-
-  // Stash data the plugins will read
+  // Stash data the plugins will read — labelled bubbles + the aggregate "You" anchor
   _chartFrontierLabelData = holdingData.map(function(d){
     var label = d.label.length > 18 ? d.label.slice(0, 16) + '…' : d.label;
     return { x: d.x, y: d.y, r: d.r, text: label };
   });
   _chartFrontierLabelData.push({ x: portRisk, y: portReturn, r: 14, text: 'You', bold: true });
-  // Reference dots are explained in the legend strip below — skip in-chart labels to avoid clashing with regime band labels
-  if (proposed) _chartFrontierLabelData.push({ x: proposed.x, y: proposed.y, r: 11, text: proposed.label, accent: true });
+  // Reference dots are explained in the legend strip — skip in-chart labels to avoid clashing with regime band labels
 
-  _chartFrontierArrowData = proposed ? { from: { x: portRisk, y: portReturn }, to: { x: proposed.x, y: proposed.y } } : null;
+  _chartFrontierArrowData = null; // proposed-move overlay removed; chart is the clean heat map
 
   destroyChart('chart-frontier');
   var canvas = document.getElementById('chart-frontier');
@@ -7465,16 +7415,6 @@ function _renderFrontierInner() {
       hoverBorderWidth:3 }
   ];
 
-  if (proposed) {
-    datasets.push({
-      label:'Proposed', type:'bubble',
-      data: [{ x: proposed.x, y: proposed.y, r: 11 }],
-      backgroundColor:'rgba(109,63,160,0.18)',
-      borderColor:'#6d3fa0', borderWidth:2,
-      borderDash:[4,3]
-    });
-  }
-
   charts['chart-frontier'] = safeChart(canvas, {
     type:'bubble',
     data:{ datasets: datasets },
@@ -7493,7 +7433,6 @@ function _renderFrontierInner() {
                 return d ? [d.label, 'Risk: '+d.x.toFixed(1), 'Return: '+d.y.toFixed(2)+'% p.a.', 'Value: '+fmtSGD(d.value)] : '';
               }
               if (ds === 'Your portfolio') return ['Your portfolio', 'Risk: R'+portRisk, 'Return: '+portReturn.toFixed(2)+'% p.a.'];
-              if (ds === 'Proposed' && proposed) return [proposed.label, 'Risk: R'+proposed.x.toFixed(1), 'Return: '+proposed.y.toFixed(2)+'% p.a.'];
               if (ds === 'Reference') { var p = refPoints[c.dataIndex]; return p ? [p.label, 'Risk: R'+p.x, 'Return: '+p.y.toFixed(2)+'%'] : ''; }
               if (ds && ds.indexOf('Frontier') === 0) return ['Efficient frontier', 'Risk: R'+c.parsed.x, 'Return: '+c.parsed.y.toFixed(2)+'% p.a.'];
               return '';
@@ -7536,15 +7475,6 @@ function _renderFrontierInner() {
     else tpEl.innerHTML = pts.map(function(p){ return '<div class="frontier-tp"><span class="frontier-tp-title">'+p.t+'</span>'+p.b+'</div>'; }).join('');
   }
 }
-
-// Keep frontier in sync when simulator inputs change
-window.addEventListener('input', function(e){
-  if (!e.target || !e.target.id) return;
-  if (/^sim-ilp-/.test(e.target.id)) {
-    var fp = document.getElementById('page-frontier');
-    if (fp && fp.classList.contains('active')) renderFrontier();
-  }
-});
 
 // ══════════════════════════════════════════════════
 //  PRODUCT STRATEGY BUILDER
