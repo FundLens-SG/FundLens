@@ -4679,13 +4679,34 @@ var ckgDrive = {
   isAvailable: function() { return !!_hubAuthHeaders(); },
 
   async list() {
-    var folderId = await _ensureFundLensFolder();
-    var q = "'"+folderId+"' in parents and trashed=false and mimeType='application/json'";
+    // Primary: query by appProperties.kind = 'fundlens-portfolio'. This finds
+    // every FundLens save regardless of which "Portfolios" folder it landed
+    // in — protects against duplicate-folder bugs in the ensureSubfolder
+    // helper (which we've seen create two "Portfolios" folders under
+    // CKGTools/FundLens in the wild). Folder-scoped lookup was the cause
+    // of "I saved but Load shows nothing".
+    var q = "trashed=false and mimeType='application/json' and appProperties has { key='kind' and value='fundlens-portfolio' }";
     var url = 'https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)
-      +'&fields=files(id,name,modifiedTime,size,appProperties)&orderBy=modifiedTime desc&pageSize=100';
+      +'&fields=files(id,name,modifiedTime,size,appProperties,parents)&orderBy=modifiedTime desc&pageSize=100';
     var resp = await _driveFetch(url);
     var json = await resp.json().catch(function(){return{};});
-    return json.files || [];
+    var files = json.files || [];
+
+    // Fallback for legacy saves that predate the appProperties.kind stamp:
+    // also include any FundLens-named JSON in the configured folder.
+    if (!files.length) {
+      try {
+        var folderId = await _ensureFundLensFolder();
+        var q2 = "'"+folderId+"' in parents and trashed=false and mimeType='application/json'";
+        var resp2 = await _driveFetch('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q2)
+          +'&fields=files(id,name,modifiedTime,size,appProperties,parents)&orderBy=modifiedTime desc&pageSize=100');
+        var json2 = await resp2.json().catch(function(){return{};});
+        files = json2.files || [];
+      } catch(e) {
+        console.warn('[ckgDrive.list] legacy folder fallback failed:', e && e.message);
+      }
+    }
+    return files;
   },
 
   // payload: { holdings, clientInfo, stratProducts, _ts, _ver, _checksum }
