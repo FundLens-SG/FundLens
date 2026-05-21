@@ -14,13 +14,42 @@
 <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIkZ1bmRMZW5zwqkgUG9ydGZvbGlvIEFuYWx5c2VyIiwKICAic2hvcnRfbmFtZSI6ICJGdW5kTGVucyIsCiAgImRlc2NyaXB0aW9uIjogIkludmVzdG1lbnQgcG9ydGZvbGlvIGFuYWx5c2lzIHRvb2wgZm9yIGZpbmFuY2lhbCBhZHZpc29ycyIsCiAgInN0YXJ0X3VybCI6ICIuIiwKICAiZGlzcGxheSI6ICJzdGFuZGFsb25lIiwKICAiYmFja2dyb3VuZF9jb2xvciI6ICIjMGQxMTE3IiwKICAidGhlbWVfY29sb3IiOiAiIzBkMTExNyIsCiAgImljb25zIjogWwogICAgeyJzcmMiOiAiaWNvbi0xOTIucG5nIiwgInNpemVzIjogIjE5MngxOTIiLCAidHlwZSI6ICJpbWFnZS9wbmciLCAicHVycG9zZSI6ICJhbnkifSwKICAgIHsic3JjIjogImljb24tNTEyLnBuZyIsICJzaXplcyI6ICI1MTJ4NTEyIiwgInR5cGUiOiAiaW1hZ2UvcG5nIiwgInB1cnBvc2UiOiAiYW55In0sCiAgICB7InNyYyI6ICJpY29uLTE5Mi5wbmciLCAic2l6ZXMiOiAiMTkyeDE5MiIsICJ0eXBlIjogImltYWdlL3BuZyIsICJwdXJwb3NlIjogIm1hc2thYmxlIn0sCiAgICB7InNyYyI6ICJpY29uLTUxMi5wbmciLCAic2l6ZXMiOiAiNTEyeDUxMiIsICJ0eXBlIjogImltYWdlL3BuZyIsICJwdXJwb3NlIjogIm1hc2thYmxlIn0KICBdCn0K">
 <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="none" stroke="%23D6A87A" stroke-width="1.4"/><circle cx="16" cy="16" r="10.5" fill="none" stroke="rgba(214,168,122,0.18)" stroke-width="0.9"/><line x1="9.5" y1="20.5" x2="9.5" y2="17.5" stroke="%23D6A87A" stroke-width="1.6" stroke-linecap="round"/><line x1="13.5" y1="20.5" x2="13.5" y2="14.5" stroke="%23D6A87A" stroke-width="1.6" stroke-linecap="round"/><line x1="17.5" y1="20.5" x2="17.5" y2="11.5" stroke="%23D6A87A" stroke-width="1.6" stroke-linecap="round"/><line x1="21.5" y1="20.5" x2="21.5" y2="8.5" stroke="%23D6A87A" stroke-width="1.6" stroke-linecap="round"/><path d="M 7.5 20 Q 14 14 23.5 7.5" fill="none" stroke="%23D6A87A" stroke-width="1.4" stroke-linecap="round" opacity="0.85"/><circle cx="23.5" cy="7.5" r="1.4" fill="%23D6A87A"/></svg>'>
 <script>
-// Register Service Worker for offline PWA
+// Service Worker — v3 (network-first for HTML, aggressive stale-cache purge)
+// Previous versions used cache-first for everything which could trap users on
+// stale HTML when we ship a new build (mobile especially). This version:
+//   1. Unregisters any prior FundLens service worker on load.
+//   2. Purges ALL caches before registering the new SW.
+//   3. New SW: network-first for HTML, cache-first for static assets,
+//      clears caches again on its own activate event as belt-and-braces.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
-    var swCode = "self.addEventListener('install',function(e){self.skipWaiting();});self.addEventListener('activate',function(e){e.waitUntil(clients.claim());});self.addEventListener('fetch',function(e){e.respondWith(caches.match(e.request).then(function(r){return r||fetch(e.request).catch(function(){return new Response('Offline');})}));});";
-    var blob = new Blob([swCode], {type: 'application/javascript'});
-    var swUrl = URL.createObjectURL(blob);
-    navigator.serviceWorker.register(swUrl).catch(function(){});
+    // Step 1+2: nuke prior SWs and caches synchronously-ish before registering
+    var purgePromise = Promise.resolve();
+    try {
+      if (window.caches && typeof caches.keys === 'function') {
+        purgePromise = caches.keys().then(function(keys){
+          return Promise.all(keys.map(function(k){ return caches.delete(k); }));
+        }).catch(function(){});
+      }
+    } catch(e) {}
+
+    purgePromise.then(function(){
+      var swCode = [
+        "self.addEventListener('install',function(e){self.skipWaiting();});",
+        "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));}).then(function(){return clients.claim();}));});",
+        "self.addEventListener('fetch',function(e){",
+        "  var req=e.request;",
+        "  if(req.mode==='navigate'||req.destination==='document'){",
+        "    e.respondWith(fetch(req).catch(function(){return caches.match(req).then(function(r){return r||new Response('Offline');});}));",
+        "    return;",
+        "  }",
+        "  e.respondWith(caches.match(req).then(function(r){return r||fetch(req).catch(function(){return new Response('Offline');});}));",
+        "});"
+      ].join('\n');
+      var blob = new Blob([swCode], {type: 'application/javascript'});
+      var swUrl = URL.createObjectURL(blob);
+      navigator.serviceWorker.register(swUrl).catch(function(){});
+    });
   });
 }
 </script>
@@ -469,10 +498,16 @@ body { max-width: 100vw; }
 .bottom-nav-inner { display: flex; align-items: stretch; }
 .bnav-item {
   flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 2px; padding: 7px 2px 5px;
-  cursor: pointer; color: rgba(255,255,255,0.4); font-size: 9px;
-  font-weight: 500; transition: color 0.15s; letter-spacing: 0.2px;
+  justify-content: center; gap: 2px; padding: 7px 1px 5px;
+  cursor: pointer; color: rgba(255,255,255,0.4); font-size: 8.5px;
+  font-weight: 500; transition: color 0.15s; letter-spacing: 0.1px;
   -webkit-tap-highlight-color: transparent; min-height: 50px;
+  text-align: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+@media (max-width: 380px) {
+  .bnav-item { font-size: 8px; padding: 6px 1px 4px; letter-spacing: 0; }
 }
 .bnav-item.active { color: var(--teal-mid); }
 .bnav-icon { width: 18px; height: 18px; line-height: 1; opacity: 0.85; }
@@ -538,6 +573,10 @@ body.present-mode .holdings-toolbar { display: none !important; }
   padding: 8px 14px; font-size: 12.5px; font-weight: 600;
   cursor: pointer;
   box-shadow: 0 6px 24px rgba(0,0,0,0.18);
+  -webkit-tap-highlight-color: transparent;
+}
+@media (max-width: 480px) {
+  .present-exit { top: 10px; right: 10px; padding: 6px 10px; font-size: 11px; }
 }
 body.present-mode .present-exit { display: inline-flex; align-items: center; gap: 6px; }
 .present-exit:hover { background: #2a241d; }
@@ -7077,34 +7116,44 @@ function printOnePager() {
 //  STATED-PROFILE ALIGNMENT BANNER (Patch C)
 // ══════════════════════════════════════════════════
 function renderAlignmentBanner() {
-  var b = document.getElementById('profile-alignment-banner');
-  if (!b) return;
-  if (!holdings || !holdings.length) { b.style.display = 'none'; return; }
+  try {
+    var b = document.getElementById('profile-alignment-banner');
+    if (!b) return;
+    if (!holdings || !holdings.length) { b.style.display = 'none'; return; }
 
-  var pr = (typeof calcPortfolioRisk === 'function') ? calcPortfolioRisk() : null;
-  if (!pr || pr.score == null) { b.style.display = 'none'; return; }
+    var pr = (typeof calcPortfolioRisk === 'function') ? calcPortfolioRisk() : null;
+    if (!pr || pr.score == null) { b.style.display = 'none'; return; }
 
-  var statedRaw = (document.getElementById('ci-risk')||{}).value || (clientInfo && clientInfo.riskProfile) || 'moderate';
-  var statedRiskMap = { conservative:[1,3], moderate:[3,5], balanced:[4,5], growth:[6,7], aggressive:[7,9] };
-  var band = statedRiskMap[statedRaw] || [3,5];
-  var stated = statedRaw.charAt(0).toUpperCase() + statedRaw.slice(1);
-  var actual = pr.score;
+    var statedRaw = (document.getElementById('ci-risk')||{}).value || (clientInfo && clientInfo.riskProfile) || 'moderate';
+    var statedRiskMap = { conservative:[1,3], moderate:[3,5], balanced:[4,5], growth:[6,7], aggressive:[7,9] };
+    var band = statedRiskMap[statedRaw] || [3,5];
+    var stated = statedRaw.charAt(0).toUpperCase() + statedRaw.slice(1);
+    var actual = pr.score;
 
-  document.getElementById('ab-stated').textContent = stated + ' (R' + band[0] + '–' + band[1] + ')';
-  document.getElementById('ab-actual').textContent = 'R' + actual + ' / 10';
+    var stEl = document.getElementById('ab-stated');
+    var acEl = document.getElementById('ab-actual');
+    var chipEl = document.getElementById('ab-chip');
+    if (!stEl || !acEl || !chipEl) return;
 
-  var chip = document.getElementById('ab-chip');
-  if (actual < band[0] - 1 || actual > band[1] + 1) {
-    chip.innerHTML = '<span class="frontier-chip miss">⚠ Misaligned</span>';
-    b.style.borderLeftColor = 'var(--coral)';
-  } else if (actual < band[0] || actual > band[1]) {
-    chip.innerHTML = '<span class="frontier-chip gap">~ Edge of band</span>';
-    b.style.borderLeftColor = 'var(--amber)';
-  } else {
-    chip.innerHTML = '<span class="frontier-chip match">✓ Aligned</span>';
-    b.style.borderLeftColor = 'var(--teal)';
+    stEl.textContent = stated + ' (R' + band[0] + '–' + band[1] + ')';
+    acEl.textContent = 'R' + actual + ' / 10';
+
+    if (actual < band[0] - 1 || actual > band[1] + 1) {
+      chipEl.innerHTML = '<span class="frontier-chip miss">⚠ Misaligned</span>';
+      b.style.borderLeftColor = 'var(--coral)';
+    } else if (actual < band[0] || actual > band[1]) {
+      chipEl.innerHTML = '<span class="frontier-chip gap">~ Edge of band</span>';
+      b.style.borderLeftColor = 'var(--amber)';
+    } else {
+      chipEl.innerHTML = '<span class="frontier-chip match">✓ Aligned</span>';
+      b.style.borderLeftColor = 'var(--teal)';
+    }
+    b.style.display = '';
+  } catch(e) {
+    console.warn('[renderAlignmentBanner] suppressed:', e);
+    var b2 = document.getElementById('profile-alignment-banner');
+    if (b2) b2.style.display = 'none';
   }
-  b.style.display = '';
 }
 
 // Re-render banner if the risk-profile dropdown changes
@@ -7265,6 +7314,13 @@ var _chartFrontierLabelData = [];
 var _chartFrontierArrowData = null;
 
 function renderFrontier() {
+  try { return _renderFrontierInner(); } catch(e) {
+    console.warn('[renderFrontier] suppressed:', e);
+    var hl0 = document.getElementById('frontier-headline');
+    if (hl0) hl0.textContent = 'Unable to render frontier — please reload.';
+  }
+}
+function _renderFrontierInner() {
   var hl = document.getElementById('frontier-headline');
   var stEl = document.getElementById('frontier-stated');
   var actEl = document.getElementById('frontier-actual');
