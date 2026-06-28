@@ -14,49 +14,78 @@
 <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIkZ1bmRMZW5zwqkgUG9ydGZvbGlvIEFuYWx5c2VyIiwKICAic2hvcnRfbmFtZSI6ICJGdW5kTGVucyIsCiAgImRlc2NyaXB0aW9uIjogIkludmVzdG1lbnQgcG9ydGZvbGlvIGFuYWx5c2lzIHRvb2wgZm9yIGZpbmFuY2lhbCBhZHZpc29ycyIsCiAgInN0YXJ0X3VybCI6ICIuIiwKICAiZGlzcGxheSI6ICJzdGFuZGFsb25lIiwKICAiYmFja2dyb3VuZF9jb2xvciI6ICIjMGQxMTE3IiwKICAidGhlbWVfY29sb3IiOiAiIzBkMTExNyIsCiAgImljb25zIjogWwogICAgeyJzcmMiOiAiaWNvbi0xOTIucG5nIiwgInNpemVzIjogIjE5MngxOTIiLCAidHlwZSI6ICJpbWFnZS9wbmciLCAicHVycG9zZSI6ICJhbnkifSwKICAgIHsic3JjIjogImljb24tNTEyLnBuZyIsICJzaXplcyI6ICI1MTJ4NTEyIiwgInR5cGUiOiAiaW1hZ2UvcG5nIiwgInB1cnBvc2UiOiAiYW55In0sCiAgICB7InNyYyI6ICJpY29uLTE5Mi5wbmciLCAic2l6ZXMiOiAiMTkyeDE5MiIsICJ0eXBlIjogImltYWdlL3BuZyIsICJwdXJwb3NlIjogIm1hc2thYmxlIn0sCiAgICB7InNyYyI6ICJpY29uLTUxMi5wbmciLCAic2l6ZXMiOiAiNTEyeDUxMiIsICJ0eXBlIjogImltYWdlL3BuZyIsICJwdXJwb3NlIjogIm1hc2thYmxlIn0KICBdCn0K">
 <link rel="icon" type="image/svg+xml" href='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="none" stroke="%23D6A87A" stroke-width="1.4"/><circle cx="16" cy="16" r="10.5" fill="none" stroke="rgba(214,168,122,0.18)" stroke-width="0.9"/><line x1="9.5" y1="20.5" x2="9.5" y2="17.5" stroke="%23D6A87A" stroke-width="1.6" stroke-linecap="round"/><line x1="13.5" y1="20.5" x2="13.5" y2="14.5" stroke="%23D6A87A" stroke-width="1.6" stroke-linecap="round"/><line x1="17.5" y1="20.5" x2="17.5" y2="11.5" stroke="%23D6A87A" stroke-width="1.6" stroke-linecap="round"/><line x1="21.5" y1="20.5" x2="21.5" y2="8.5" stroke="%23D6A87A" stroke-width="1.6" stroke-linecap="round"/><path d="M 7.5 20 Q 14 14 23.5 7.5" fill="none" stroke="%23D6A87A" stroke-width="1.4" stroke-linecap="round" opacity="0.85"/><circle cx="23.5" cy="7.5" r="1.4" fill="%23D6A87A"/></svg>'>
 <script>
-// Service Worker — v3 (network-first for HTML, aggressive stale-cache purge)
-// Previous versions used cache-first for everything which could trap users on
-// stale HTML when we ship a new build (mobile especially). This version:
-//   1. Unregisters any prior FundLens service worker on load.
-//   2. Purges ALL caches before registering the new SW.
-//   3. New SW: network-first for HTML, cache-first for static assets,
-//      clears caches again on its own activate event as belt-and-braces.
+// Service Worker — v4. Network-first for HTML (so a new build is never trapped
+// behind stale cache), cache-first for same-origin static assets (so the app
+// genuinely works offline — the prior inline blob SW purged ALL caches on every
+// load and therefore never warmed). Versioned cache cleanup lives in sw.js's
+// activate handler, so we no longer blanket-purge here. We do unregister any
+// leftover blob-URL SW from the old build to transition cleanly.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
-    // Step 1+2: nuke prior SWs and caches synchronously-ish before registering
-    var purgePromise = Promise.resolve();
-    try {
-      if (window.caches && typeof caches.keys === 'function') {
-        purgePromise = caches.keys().then(function(keys){
-          return Promise.all(keys.map(function(k){ return caches.delete(k); }));
-        }).catch(function(){});
-      }
-    } catch(e) {}
-
-    purgePromise.then(function(){
-      var swCode = [
-        "self.addEventListener('install',function(e){self.skipWaiting();});",
-        "self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));}).then(function(){return clients.claim();}));});",
-        "self.addEventListener('fetch',function(e){",
-        "  var req=e.request;",
-        "  if(req.mode==='navigate'||req.destination==='document'){",
-        "    e.respondWith(fetch(req).catch(function(){return caches.match(req).then(function(r){return r||new Response('Offline');});}));",
-        "    return;",
-        "  }",
-        "  e.respondWith(caches.match(req).then(function(r){return r||fetch(req).catch(function(){return new Response('Offline');});}));",
-        "});"
-      ].join('\n');
-      var blob = new Blob([swCode], {type: 'application/javascript'});
-      var swUrl = URL.createObjectURL(blob);
-      navigator.serviceWorker.register(swUrl).catch(function(){});
+    navigator.serviceWorker.getRegistrations().then(function(regs){
+      return Promise.all(regs.map(function(reg){
+        var s = (reg.active && reg.active.scriptURL) || '';
+        return s.indexOf('blob:') === 0 ? reg.unregister() : Promise.resolve();
+      }));
+    }).catch(function(){}).then(function(){
+      navigator.serviceWorker.register('sw.js').catch(function(){});
     });
   });
 }
 </script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;1,9..144,300&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" integrity="sha384-bs/nf9FbdNouRbMiFcrcZfLXYPKiPaGVGplVbv7dLGECccEXDW+S3zjqSKR5ZEaD" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" integrity="sha384-GFr3yTh5lJznCbZfpTtXnwboFsxqtTQoeTZCRHhE0579KrRmlCzen5AA8ohaB5ug" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+// ── Global error boundary + lightweight observability (no PII) ──
+// Captures otherwise-invisible async failures (unhandled rejections, runtime
+// errors) into a bounded ring buffer and flushes them — JWT-gated and
+// fire-and-forget — to the CKG proxy /errors sink. Only error kind/message/
+// timestamp are sent; client PII (name/NRIC/phone/email) is never logged here.
+(function(){
+  window.__flErrors = window.__flErrors || [];
+  var _lastToast = 0;
+  function record(kind, msg, extra){
+    try {
+      window.__flErrors.push({ t: Date.now(), kind: kind, msg: String(msg).slice(0,500), extra: extra || null });
+      if (window.__flErrors.length > 50) window.__flErrors.shift();
+    } catch(e) {}
+  }
+  window.__flRecordError = record;
+  window.addEventListener('error', function(ev){
+    record('error', (ev && ev.message) || 'error', (ev && ev.filename) ? { f: ev.filename, l: ev.lineno } : null);
+  });
+  window.addEventListener('unhandledrejection', function(ev){
+    var r = ev && ev.reason;
+    record('unhandledrejection', (r && (r.message || r)) || 'unhandledrejection');
+    try {
+      var now = Date.now();
+      if (typeof showToast === 'function' && (now - _lastToast) > 30000) {
+        _lastToast = now;
+        showToast('Something went wrong — your data is saved.');
+      }
+    } catch(e){}
+  });
+  async function flush(){
+    try {
+      if (!window.__flErrors.length) return;
+      if (typeof CKG_PROXY === 'undefined' || typeof _hubAuthHeaders !== 'function') return;
+      var hdr = _hubAuthHeaders();
+      if (!hdr) return; // no session — keep buffer, try later
+      var batch = window.__flErrors.slice(0, 30);
+      var resp = await fetch(CKG_PROXY + '/errors', {
+        method: 'POST', keepalive: true,
+        headers: Object.assign({ 'Content-Type': 'application/json' }, hdr),
+        body: JSON.stringify({ app: 'fundlens', errors: batch })
+      });
+      if (resp && resp.ok) window.__flErrors.splice(0, batch.length);
+    } catch(e) { /* keep buffer for next tick */ }
+  }
+  try { setInterval(flush, 60000); } catch(e) {}
+  window.addEventListener('pagehide', flush);
+})();
+</script>
 <style>
 :root {
   --bg: #f5f4f0;
@@ -904,7 +933,7 @@ body { padding-top: var(--ckg-strip-h) !important; }
         <p style="margin:0 0 12px;"><strong>Data Sources &amp; Compilation</strong><br>
         All fund, ETF, and stock information in FundLens® has been compiled from publicly available sources using Claude AI (Anthropic). Fund and ETF data, including risk ratings, are sourced from the iFAST repository and official insurer websites (AIA, Great Eastern, Prudential, Manulife, NTUC Income). Data may change over time and may not reflect the most current information.</p>
         <p style="margin:0 0 12px;"><strong>Risk Analysis Methodology</strong><br>
-        Risk analysis of individual stocks is performed using a quantitative formula based on CFA-standard metrics (Beta, Volatility, Debt-to-Equity ratio, and sector-adjusted qualitative factors). This methodology is one of many used by professional analysts and <strong>may not represent the most current or comprehensive way to assess risk</strong>. Portfolio-level risk uses a Markowitz mean-variance framework with empirical cross-asset correlations and concentration adjustments. The efficient frontier is computed via Michaud resampled optimization.</p>
+        Risk analysis of individual stocks is performed using a quantitative formula based on CFA-standard metrics (Beta, Volatility, Debt-to-Equity ratio, and sector-adjusted qualitative factors). This methodology is one of many used by professional analysts and <strong>may not represent the most current or comprehensive way to assess risk</strong>. Portfolio-level risk uses a Markowitz mean-variance framework with empirical cross-asset correlations and concentration adjustments. The frontier shown is a strategic asset-class glidepath (model allocations calibrated from JPM LTCMA 2024 and the Vanguard outlook with a return-sensitivity band), not a portfolio optimisation.</p>
         <p style="margin:0 0 12px;"><strong>Not Financial Advice</strong><br>
         FundLens® is a portfolio analysis tool for informational and educational purposes only. It does not constitute financial advice, a recommendation to buy or sell any security, or an offer of any financial product. Users should consult a licensed financial advisor before making investment decisions.</p>
         <p style="margin:0 0 12px;"><strong>No Warranty</strong><br>
@@ -1338,7 +1367,7 @@ body { padding-top: var(--ckg-strip-h) !important; }
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
       <div>
         <div class="card-title" style="margin-bottom:2px;">Efficient Frontier</div>
-        <div class="card-sub" style="margin:0;">Michaud resampled · JPM LTCMA 2024 · ±1σ confidence band</div>
+        <div class="card-sub" style="margin:0;">Strategic glidepath · JPM LTCMA 2024 · return-sensitivity band</div>
       </div>
       <div style="font-size:11px;color:var(--muted);">Equity / Bond / ILP positioning relative to the model frontier</div>
     </div>
@@ -1376,7 +1405,7 @@ body { padding-top: var(--ckg-strip-h) !important; }
 
   <!-- PRINT-ONLY footer -->
   <div class="print-footer">
-    Risk model: Markowitz mean-variance with empirical cross-asset correlations; efficient frontier via Michaud resampled optimisation (200 bootstraps), calibrated from JPMorgan LTCMA 2024 and Vanguard outlook. <strong>This document is for informational and educational purposes only — it is not financial advice, a recommendation to buy or sell any security, or an offer of any financial product. Past performance is not indicative of future results.</strong> Ace Asset Management · FundLens<sup>®</sup>
+    Risk model: Markowitz mean-variance with empirical cross-asset correlations; strategic asset-class glidepath with a return-sensitivity band, calibrated from JPMorgan LTCMA 2024 and Vanguard outlook. <strong>This document is for informational and educational purposes only — it is not financial advice, a recommendation to buy or sell any security, or an offer of any financial product. Past performance is not indicative of future results.</strong> Ace Asset Management · FundLens<sup>®</sup>
   </div>
 </div>
 
@@ -4462,22 +4491,35 @@ function _resolveProxyUrl(url) {
   return CKG_PROXY + '/proxy?url=' + encodeURIComponent(url);
 }
 
-function doFetchUrl(url, cb) {
+function doFetchUrl(url, cb, _attempt) {
   var hdr = _hubAuthHeaders();
   if (!hdr) { cb(null); return; }
   var resolved = _resolveProxyUrl(url);
   if (!resolved) { cb(null); return; }
+  _attempt = _attempt || 0;
+  var MAX_RETRY = 1; // one retry on transient failures (429 / 5xx / network)
+  function retryOrFail(retryable) {
+    if (retryable && _attempt < MAX_RETRY) {
+      setTimeout(function(){ doFetchUrl(url, cb, _attempt + 1); }, 600 * (_attempt + 1));
+    } else {
+      cb(null);
+    }
+  }
   try {
     var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     var timer = ctrl ? setTimeout(function(){ try { ctrl.abort(); } catch(e){} }, 12000) : null;
     fetch(resolved, { headers: hdr, signal: ctrl ? ctrl.signal : undefined })
       .then(function(r) {
         if (timer) clearTimeout(timer);
-        if (!r.ok) return null;
-        return r.json().catch(function(){ return null; });
+        if (!r.ok) {
+          // 429 (rate limit) and 5xx are transient → retry once with backoff.
+          // Other 4xx (genuinely not found / bad request) are terminal.
+          retryOrFail(r.status === 429 || r.status >= 500);
+          return;
+        }
+        r.json().then(function(data){ cb(data); }).catch(function(){ cb(null); });
       })
-      .then(function(data) { cb(data); })
-      .catch(function() { if (timer) clearTimeout(timer); cb(null); });
+      .catch(function() { if (timer) clearTimeout(timer); retryOrFail(true); }); // network/abort
   } catch(e) { cb(null); }
 }
 
@@ -4506,6 +4548,33 @@ window._ckgSession = null;
 window._driveAccessToken = null;
 window._driveTokenExpiresAt = 0;
 
+// Clear every trace of client PII + credentials from this device. Called on
+// hub sign-out so a shared advisory machine never leaks the previous client's
+// data (name/NRIC/phone/email/notes), Drive identity, or live Drive token to
+// the next user. Standalone (no-session) use is preserved — this only fires on
+// an explicit SIGNED_OUT event.
+function fundlensWipeLocalIdentity() {
+  // 1. Local caches
+  try { localStorage.removeItem('fundlens_autosave'); } catch(e) {}
+  try { localStorage.removeItem(CKG_DRIVE_LS.folderId); } catch(e) {}
+  try { localStorage.removeItem(CKG_DRIVE_LS.userEmail); } catch(e) {}
+  try { localStorage.removeItem('fundlens_openai_key'); } catch(e) {} // purge legacy leaked key
+  // 2. In-memory tokens / session / linked file
+  window._driveAccessToken = null;
+  window._driveTokenExpiresAt = 0;
+  window._ckgSession = null;
+  window._user = null;
+  window.__fundlensScanConsent = false;
+  try { _ckgLinkedFileId = null; } catch(e) {}
+  // 3. In-memory client record + DOM fields
+  try {
+    clientInfo = { name:'', nric:'', age:'', retireAge:'', riskProfile:'moderate', phone:'', email:'', notes:'' };
+    ['ci-name','ci-age','ci-retire','ci-risk','ci-nric','ci-phone','ci-email','ci-notes'].forEach(function(id){
+      var el = document.getElementById(id); if (el) el.value = (id === 'ci-risk') ? 'moderate' : '';
+    });
+  } catch(e) {}
+}
+
 function _initCkgSupabase() {
   if (window._SB) return window._SB;
   try {
@@ -4513,6 +4582,18 @@ function _initCkgSupabase() {
     window._SB = window.supabase.createClient(CKG_SUPABASE_URL, CKG_SUPABASE_ANON, {
       auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: false, flowType: 'pkce' }
     });
+    // Keep our cached session/token live (autoRefreshToken only refreshes
+    // supabase-js's own copy, not window._ckgSession), and wipe local PII the
+    // instant the adviser signs out at the hub.
+    try {
+      window._SB.auth.onAuthStateChange(function(event, session) {
+        if (session) { window._ckgSession = session; window._user = session.user || null; }
+        if (event === 'SIGNED_OUT') {
+          window._ckgSession = null; window._user = null;
+          try { fundlensWipeLocalIdentity(); } catch(e) {}
+        }
+      });
+    } catch(e) {}
     return window._SB;
   } catch(e) { console.warn('[CKG] Supabase init error:', e); return null; }
 }
@@ -4753,6 +4834,23 @@ var ckgDrive = {
     if (!resp.ok || !result.id) {
       throw new Error('Drive save failed: ' + ((result.error && result.error.message) || resp.status));
     }
+    // Read-back verification: catch a silent partial/truncated write that Drive
+    // still 200s. Only a DEFINITIVE bad outcome (file present but 0 bytes) fails
+    // the save; a transient verify-GET error is swallowed so we never turn a
+    // genuinely-good save into a false failure + duplicate local download.
+    try {
+      var vresp = await _driveFetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(result.id)+'?fields=id,size');
+      if (vresp.ok) {
+        var vmeta = await vresp.json().catch(function(){return{};});
+        var savedSize = (vmeta && vmeta.size != null) ? parseInt(vmeta.size, 10) : -1;
+        if (vmeta && vmeta.id && savedSize === 0) {
+          throw new Error('Drive reported the saved file as empty (0 bytes)');
+        }
+      }
+    } catch (ve) {
+      if (ve && /empty|0 bytes/.test(ve.message || '')) throw ve;
+      // transient/verify error — trust the write's own 200 + result.id
+    }
     return { fileId: result.id, modifiedTime: result.modifiedTime, fileName: fileName };
   },
 
@@ -4818,13 +4916,21 @@ function showAddMenu() {
 }
 
 function getScanAPIKey() {
-  var key = null;
-  try { key = localStorage.getItem('fundlens_openai_key'); } catch(e) {}
-  if (key) return key;
-  key = prompt('To use document scanning, enter your OpenAI API key.\nGet one at platform.openai.com/api-keys\n\nYour key is stored locally and never sent anywhere except OpenAI.');
-  if (!key) return null;
-  try { localStorage.setItem('fundlens_openai_key', key.trim()); } catch(e) {}
-  return key.trim();
+  // Document scanning now routes through the CKG hub proxy (/claude) using the
+  // signed-in adviser's JWT. No API key ever lives in the browser, and no client
+  // PII is sent to a third party outside the CKG-controlled proxy.
+  var hdr = _hubAuthHeaders();
+  if (!hdr) {
+    alert('Document scanning needs an active CKGTools session.\n\nOpen FundLens from the CKGTools hub (so you are signed in) and try again.');
+    return null;
+  }
+  // One-time-per-session PDPA consent gate before any image leaves the device.
+  if (!window.__fundlensScanConsent) {
+    var ok = confirm('Document scanning sends the selected images to CKG’s AI provider through the secure CKGTools proxy to extract figures.\n\nThese images may contain client personal data — only proceed if you have the client’s consent.\n\nContinue?');
+    if (!ok) return null;
+    window.__fundlensScanConsent = true;
+  }
+  return true; // sentinel: authorised (no key)
 }
 
 function scanNewHolding() {
@@ -4959,23 +5065,32 @@ function processScan(holdingId, files, apiKey) {
       +'If multiple products are visible in the images, return an array of objects. '
       +'All monetary values must be plain numbers (no $ signs, no commas). Use null for fields not found.';
 
-    // Build content array for OpenAI vision
+    // Build content array for Claude (Anthropic) vision — routed through the
+    // CKG hub proxy (/claude) so no API key ever lives in the browser and the
+    // upload is gated by the adviser's signed-in hub JWT.
     var content = images.map(function(img) {
-      return {type:'image_url', image_url:{url:'data:'+img.mediaType+';base64,'+img.base64, detail:'high'}};
+      return {type:'image', source:{type:'base64', media_type:(img.mediaType||'image/jpeg'), data:img.base64}};
     });
     content.push({type:'text', text:'Extract all financial data from these document image(s). Return ONLY the JSON.'});
 
-    fetch('https://api.openai.com/v1/chat/completions', {
+    var _scanHdr = _hubAuthHeaders();
+    if (!_scanHdr) {
+      var sb0 = document.getElementById('scan-banner-'+holdingId);
+      if (sb0) sb0.remove();
+      if (h.name === '⏳ Scanning...') h.name = 'New Holding';
+      renderHoldings();
+      alert('Document scanning needs an active CKGTools session. Please open FundLens from the hub and sign in.');
+      return;
+    }
+
+    fetch(CKG_PROXY + '/claude', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey
-      },
+      headers: Object.assign({ 'Content-Type': 'application/json' }, _scanHdr),
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: 'claude-sonnet-4-6',
         max_tokens: 4000,
+        system: systemPrompt,
         messages: [
-          {role:'system', content:systemPrompt},
           {role:'user', content:content}
         ]
       })
@@ -4985,19 +5100,17 @@ function processScan(holdingId, files, apiKey) {
       var sb = document.getElementById('scan-banner-'+holdingId);
       if (sb) sb.remove();
 
-      if (data.error) {
+      if (data.error || data.type === 'error') {
+        var emsg = (data.error && (data.error.message || JSON.stringify(data.error))) || data.message || 'Scan service error';
         if (h.name === '⏳ Scanning...') h.name = 'New Holding';
         renderHoldings();
-        alert('API Error: '+(data.error.message||JSON.stringify(data.error)));
-        if (data.error.message && data.error.message.indexOf('key')>=0) {
-          try { localStorage.removeItem('fundlens_openai_key'); } catch(e) {}
-        }
+        alert('Scan error: '+emsg);
         return;
       }
 
       var text = '';
-      if (data.choices && data.choices[0] && data.choices[0].message) {
-        text = data.choices[0].message.content || '';
+      if (data.content && data.content[0] && data.content[0].text) {
+        text = data.content[0].text || '';
       }
       text = text.replace(/```json\s*/g,'').replace(/```\s*/g,'').trim();
 
@@ -5153,6 +5266,11 @@ function applyScanData(holdingId, data) {
       h.usdCost = data.costBasis ? +data.costBasis : null;
       if (h.usdValue) h.value = Math.round(h.usdValue * USDSGD_RATE);
       if (h.usdCost) h.cost = Math.round(h.usdCost * USDSGD_RATE);
+      // Flag when live FX was unavailable so the adviser knows the SGD figure
+      // used the static fallback rate rather than a live quote.
+      if (!USDSGD_FETCHED && (h.usdValue || h.usdCost) && typeof showToast === 'function') {
+        showToast('Live FX unavailable — USD converted at fallback ' + USDSGD_RATE.toFixed(2));
+      }
     }
 
     var notes = [];
@@ -6639,6 +6757,28 @@ function weightedRisk() {
   return all.reduce(function(s,h){ return s+(h.risk||5)*(h.value||0); },0)/tot;
 }
 
+// ── Shared diversified portfolio volatility (annualised %) ──
+// Single source of truth for σ_p so calcPortfolioRisk and
+// calcPortfolioRiskMetrics can never diverge. Floors variance at 0 because the
+// hand-calibrated CORR_MATRIX is NOT guaranteed positive semi-definite — an
+// unfloored sqrt(negative) would emit NaN that silently poisons the risk score,
+// Sharpe, diversification ratio and the frontier chart.
+function _diversifiedVolPct(list, weights) {
+  var n = list.length;
+  if (n === 0) return 0;
+  var sig = list.map(function(h){ return getHoldingSigma(h); }); // %
+  var variance = 0;
+  for (var i = 0; i < n; i++) {
+    for (var j = 0; j < n; j++) {
+      var corr = (i === j) ? 1.0 : getPairCorrelation(list[i], list[j]);
+      variance += (weights[i]||0) * (weights[j]||0) * sig[i] * sig[j] * corr;
+    }
+  }
+  if (!isFinite(variance) || variance < 0) variance = 0; // non-PSD / NaN guard
+  var vol = Math.sqrt(variance);
+  return isFinite(vol) ? vol : 0;
+}
+
 // ── Portfolio-level risk using Markowitz model + concentration penalty ──
 function calcPortfolioRisk() {
   var all = getAllAnalysisHoldings();
@@ -6652,14 +6792,8 @@ function calcPortfolioRisk() {
   var sigmas = all.map(function(h){ return getHoldingSigma(h)/100; }); // convert % to decimal
 
   // 1. PORTFOLIO VOLATILITY (Markowitz: σ_p = sqrt(Σ wi*wj*ρij*σi*σj))
-  var portfolioVar = 0;
-  for (var i = 0; i < all.length; i++) {
-    for (var j = 0; j < all.length; j++) {
-      var corr = (i === j) ? 1.0 : getPairCorrelation(all[i], all[j]);
-      portfolioVar += w[i] * w[j] * corr * sigmas[i] * sigmas[j];
-    }
-  }
-  var portfolioVol = Math.sqrt(portfolioVar) * 100; // back to %
+  // Via the shared PSD-safe helper — never NaN, never divergent from metrics.
+  var portfolioVol = _diversifiedVolPct(all, w); // already %
 
   // 2. WEIGHTED AVERAGE VOL (without diversification)
   var undiversifiedVol = 0;
@@ -7069,8 +7203,8 @@ function renderPerformance() {
     var rrData = rrAll.filter(function(h){ return bestReturn(h)!=null; }).map(function(h){
       return {x: h.risk||5, y: bestReturn(h), label: h.name, value: h.value||0};
     });
-    // Efficient frontier — Michaud resampled mean-variance optimal portfolios
-    // Computed from 200 bootstrap iterations with perturbed returns/correlations
+    // Strategic asset-class glidepath (10 model allocations) with a Monte-Carlo
+    // return-sensitivity band — NOT a portfolio optimisation. See calcResampledFrontier.
     // Calibrated from JPMorgan LTCMA 2024, Vanguard asset class expectations
     // Uses empirical cross-asset correlation matrix (equity-bond negative correlation captured)
     var ef = calcResampledFrontier();
@@ -7410,7 +7544,7 @@ function generateOnePager() {
       // Chart
       + '<div class="chart">'
         + (chartPng ? '<img src="' + chartPng + '" alt="Efficient Frontier">' : '<div style="height:90mm;background:#f8f7f4;border:1px dashed #ccc;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:9pt;">Chart unavailable &mdash; please open the Efficient Frontier tab and try again</div>')
-        + '<div class="note">Michaud resampled efficient frontier &middot; JPM LTCMA 2024 calibration &middot; &plusmn;1&sigma; confidence band &middot; bubble size proportional to holding value</div>'
+        + '<div class="note">Strategic asset-class frontier &middot; JPM LTCMA 2024 calibration &middot; return-sensitivity band &middot; bubble size proportional to holding value</div>'
       + '</div>'
       // Two-column: holdings + talking points
       + '<div class="cols">'
@@ -7430,7 +7564,7 @@ function generateOnePager() {
       + '</div>'
       // Footer
       + '<div class="foot">'
-        + 'Risk model: Markowitz mean-variance framework with empirical cross-asset correlations; efficient frontier computed via Michaud resampled optimisation (200 bootstrap iterations), calibrated from JPMorgan Long-Term Capital Market Assumptions 2024 and Vanguard outlook. Portfolio risk score: weighted average of holding-level risk ratings; concentration penalty (HHI) and diversification benefit applied. '
+        + 'Risk model: Markowitz mean-variance framework with empirical cross-asset correlations. The frontier shown is a strategic asset-class glidepath (ten model allocations from defensive to aggressive) calibrated from JPMorgan Long-Term Capital Market Assumptions 2024 and the Vanguard outlook; the shaded band is a Monte-Carlo return-sensitivity range (&plusmn;1&sigma; on the asset-class return assumptions), not a portfolio optimisation, and is illustrative rather than a recommendation to hold any specific allocation. Portfolio risk score: weighted average of holding-level risk ratings; concentration penalty (HHI) and diversification benefit applied. '
         + '<br><br>'
         + '<strong>This document is for informational and educational purposes only.</strong> It does not constitute financial advice, a recommendation to buy or sell any security, or an offer of any financial product. Users should consult a licensed financial adviser before making investment decisions. Past performance is not indicative of future results. All investments carry risk, including the possible loss of principal.'
         + '<br><br>'
@@ -8031,9 +8165,10 @@ function autoLoad() {
     if (!raw) return false;
     var state = JSON.parse(raw);
     if (!state || !state.holdings || !state.holdings.length) return false;
-    // Check if data is less than 30 days old
+    // Older than 30 days: don't auto-restore stale state, but do NOT delete it —
+    // it may be the user's only copy (cloud row could be absent/lost). It will be
+    // overwritten on the next save. Silent deletion of client data is unsafe.
     if (state._ts && (Date.now() - state._ts) > 30*24*60*60*1000) {
-      localStorage.removeItem('fundlens_autosave');
       return false;
     }
     holdings = state.holdings;
@@ -8092,9 +8227,18 @@ function clearAutoSave() {
 // in two calls because Supabase JS doesn't support compound UPSERT
 // with conditional flags in one round-trip.
 var _ckgCloudAutosaveInflight = false;
+var _ckgCloudAutosaveDirty    = false; // a save arrived while one was in flight
 var _ckgCloudAutosaveLastTs   = 0;
 var _ckgExplicitSaveTs        = 0;   // updated when user clicks Drive Save
 var _ckgCurrentAutosaveLabel  = null;
+
+// Re-flush a deferred cloud autosave when connectivity returns so offline edits
+// aren't silently stranded in localStorage (which strips PII under hub session).
+try {
+  window.addEventListener('online', function(){
+    if (typeof _doCkgCloudAutosave === 'function') _doCkgCloudAutosave().catch(function(){});
+  });
+} catch(e) {}
 
 function _ckgCurrentClientLabel() {
   var nm = (clientInfo && clientInfo.name) ? String(clientInfo.name).trim() : '';
@@ -8110,7 +8254,9 @@ async function _doCkgCloudAutosave() {
   if (!uid) return;
   // Skip if there's nothing to save (no holdings AND no client name)
   if ((!holdings || holdings.length === 0) && !(clientInfo && clientInfo.name)) return;
-  if (_ckgCloudAutosaveInflight) return;
+  // Don't drop concurrent saves — coalesce them. If one is in flight, mark dirty
+  // so the in-flight call re-fires once after it finishes (no lost final state).
+  if (_ckgCloudAutosaveInflight) { _ckgCloudAutosaveDirty = true; return; }
   _ckgCloudAutosaveInflight = true;
   try {
     var label = _ckgCurrentClientLabel();
@@ -8122,19 +8268,31 @@ async function _doCkgCloudAutosave() {
       clientInfo: clientInfo || {},
       stratProducts: typeof stratProducts !== 'undefined' ? stratProducts : []
     };
-    // Step 1: clear is_current on all other rows for this user.
-    await sb.schema('fundlens').from('autosave')
-      .update({ is_current: false })
-      .eq('user_id', uid)
-      .neq('client_label', label);
-    // Step 2: upsert the current row.
-    var { error } = await sb.schema('fundlens').from('autosave').upsert({
-      user_id: uid,
-      client_label: label,
-      payload: payload,
-      updated_at: new Date().toISOString(),
-      is_current: true
-    }, { onConflict: 'user_id,client_label' });
+    var error = null;
+    // Preferred path: atomic, transactional RPC (clear is_current + upsert in one
+    // statement) — eliminates the non-atomic two-step race that could leave the
+    // user with ZERO is_current rows (silent resume loss) and swallow the partial
+    // unique-index violation. See sql/15_fundlens_autosave_rpc.sql.
+    var rpcMissing = false;
+    try {
+      var r = await sb.schema('fundlens').rpc('save_autosave', { p_label: label, p_payload: payload });
+      error = r && r.error;
+      if (error && (error.code === 'PGRST202' || /does not exist|could not find|not find the function|schema cache/i.test(error.message || ''))) {
+        rpcMissing = true; // migration not applied yet — fall back below
+      }
+    } catch (e) { rpcMissing = true; }
+
+    if (rpcMissing) {
+      // Fallback for pre-migration deployments: non-atomic two-step (legacy).
+      await sb.schema('fundlens').from('autosave')
+        .update({ is_current: false }).eq('user_id', uid).neq('client_label', label);
+      var up = await sb.schema('fundlens').from('autosave').upsert({
+        user_id: uid, client_label: label, payload: payload,
+        updated_at: new Date().toISOString(), is_current: true
+      }, { onConflict: 'user_id,client_label' });
+      error = up && up.error;
+    }
+
     if (error) {
       console.warn('[FundLens] cloud autosave error:', error.message);
     } else {
@@ -8143,6 +8301,11 @@ async function _doCkgCloudAutosave() {
     }
   } finally {
     _ckgCloudAutosaveInflight = false;
+    // If edits landed while we were writing, flush them now.
+    if (_ckgCloudAutosaveDirty) {
+      _ckgCloudAutosaveDirty = false;
+      setTimeout(function(){ _doCkgCloudAutosave().catch(function(){}); }, 50);
+    }
   }
 }
 
@@ -8889,7 +9052,21 @@ function fmtRetColoured(v) {
   return '<span style="font-weight:600;color:'+(v>=0?'var(--teal)':'var(--coral)')+';">'+(v>=0?'+':'')+v.toFixed(1)+'%</span>';
 }
 function escHtml(s) {
-  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Defense-in-depth: coerce a loaded clientInfo (which can come from an
+// attacker-shared save file) to plain strings before it reaches the report
+// renderer. escHtml handles escaping at the sink; this prevents non-string /
+// oversized junk from a malformed file.
+function _sanitizeClientInfo(ci) {
+  ci = ci || {};
+  function str(v){ return (v == null) ? '' : String(v).slice(0, 2000); }
+  return {
+    name: str(ci.name), nric: str(ci.nric), age: str(ci.age),
+    retireAge: str(ci.retireAge), riskProfile: str(ci.riskProfile) || 'moderate',
+    phone: str(ci.phone), email: str(ci.email), notes: str(ci.notes)
+  };
 }
 
 // ══════════════════════════════════════════════════
@@ -9181,9 +9358,9 @@ function generateReport() {
     +'<div class="hdr"><div class="sub">Private Wealth Advisory '+BC(183)+' Confidential</div>'
     +'<h1>Investment Portfolio Review</h1>'
     +'<div class="meta"><div>Prepared for <span class="gd">'+escHtml(cn)+'</span></div><div>'+date+'</div>'
-    +(clientInfo.age?'<div>Age <span class="gd">'+clientInfo.age+'</span></div>':'')
-    +(clientInfo.retireAge?'<div>Retire <span class="gd">'+clientInfo.retireAge+'</span></div>':'')
-    +'<div>Risk Profile <span class="gd">'+(clientInfo.riskProfile||'—')+'</span></div>'
+    +(clientInfo.age?'<div>Age <span class="gd">'+escHtml(String(clientInfo.age))+'</span></div>':'')
+    +(clientInfo.retireAge?'<div>Retire <span class="gd">'+escHtml(String(clientInfo.retireAge))+'</span></div>':'')
+    +'<div>Risk Profile <span class="gd">'+escHtml(clientInfo.riskProfile||'—')+'</span></div>'
     +(clientInfo.notes?'<div style="font-size:7pt;color:rgba(255,255,255,0.35);">'+escHtml(clientInfo.notes)+'</div>':'')
     +'</div></div>'
 
@@ -9231,7 +9408,7 @@ function generateReport() {
 
     +'<h2>Risk-Return vs Efficient Frontier</h2>'
     +'<div style="text-align:center;">'+rrSvg()+'</div>'
-    +'<div style="font-size:6.5pt;color:#bbb;text-align:center;margin-bottom:8px;">Bubbles = holdings (size '+BC(8733)+' value). Dashed line = Michaud resampled efficient frontier (JPM LTCMA 2024, 200 bootstrap iterations).</div>'
+    +'<div style="font-size:6.5pt;color:#bbb;text-align:center;margin-bottom:8px;">Bubbles = holdings (size '+BC(8733)+' value). Dashed line = strategic asset-class glidepath (JPM LTCMA 2024 model allocations).</div>'
 
     +'<div class="g2">'
     +'<div><h3>Risk Distribution</h3><div style="text-align:center;">'+riskDistSvg()+'</div><div style="font-size:6pt;color:#bbb;text-align:center;">Value by risk level (1=Conservative '+BC(183)+' 10=Speculative)</div></div>'
@@ -9251,7 +9428,7 @@ function generateReport() {
     +'<div style="font-size:8pt;color:#5a6070;line-height:1.8;">'
     +'<p style="margin-bottom:8px;">This report is for discussion purposes only and does not constitute financial advice. Information is based on client-provided data and sources believed reliable, but accuracy is not warranted.</p>'
     +'<p style="margin-bottom:8px;">Past performance does not guarantee future results. Projections use simplified models. Actual returns may differ materially.</p>'
-    +'<p style="margin-bottom:8px;">The efficient frontier uses Michaud resampled optimization (200 bootstrap iterations) with an empirical cross-asset correlation matrix capturing equity-bond negative correlation. Asset class returns calibrated from JPMorgan LTCMA 2024 and Vanguard outlook. The confidence band shows &plusmn;1&sigma; estimation uncertainty. Tail risks and regime changes are not modelled.</p>'
+    +'<p style="margin-bottom:8px;">The frontier shown is a strategic asset-class glidepath — ten model allocations from defensive to aggressive — using an empirical cross-asset correlation matrix that captures equity-bond negative correlation. Asset-class returns are calibrated from JPMorgan LTCMA 2024 and the Vanguard outlook. The shaded band is a Monte-Carlo return-sensitivity range (&plusmn;1&sigma; on those return assumptions), not a portfolio optimisation. It is illustrative and not a recommendation to hold any specific allocation; tail risks and regime changes are not modelled.</p>'
     +'<p style="margin-bottom:8px;">Investment involves risk including possible loss of principal. Consult qualified advisors before making decisions.</p>'
     +'<p>Benchmark returns shown are index-level gross returns and do not include fees. Portfolio returns are estimated and may not reflect actual realised returns.</p>'
     +'</div>'
@@ -9466,7 +9643,7 @@ function _applySavePayload(payload) {
   if (!payload || !Array.isArray(payload.holdings)) throw new Error('Malformed save payload');
   holdings = payload.holdings;
   _migrateLoadedHoldings(holdings);
-  if (payload.clientInfo) clientInfo = payload.clientInfo;
+  if (payload.clientInfo) clientInfo = _sanitizeClientInfo(payload.clientInfo);
   if (Array.isArray(payload.stratProducts)) stratProducts = payload.stratProducts;
   populateClientInfo();
   holdings.forEach(function(h){ if (h.type==='ilp' && h.premAmt) calcILPYield(h); });
@@ -9745,12 +9922,16 @@ function getPairCorrelation(h1, h2) {
   return Math.max(-0.30, Math.min(0.98, baseCorr));
 }
 
-// ═══ MICHAUD RESAMPLED EFFICIENT FRONTIER ═══
-// Instead of a static hardcoded curve, compute from:
-// 1. Theoretical optimal asset mixes at each risk level
+// ═══ STRATEGIC ASSET-CLASS FRONTIER (MODEL GLIDEPATH) ═══
+// NOTE: This is NOT Michaud resampled optimisation — there is no optimizer and
+// no averaging of resampled weights. It evaluates a FIXED set of 10 model
+// allocations (defensive→aggressive) and runs a Monte-Carlo return-sensitivity
+// band around them. Client-facing copy is labelled accordingly. A real resampled
+// MV optimizer is tracked as a separate follow-up.
+// 1. Fixed model asset mixes at each risk level (ALLOC_TEMPLATES)
 // 2. Current market return estimates by asset class
-// 3. Bootstrap resampling (N iterations) for robustness
-// Returns array of 10 values (risk 1-10) representing mean resampled return
+// 3. Monte-Carlo return perturbation (N iterations) for the ±1σ band
+// Returns array of 10 values (risk 1-10) representing mean modelled return
 
 var _cachedFrontier = null;
 var _frontierCacheTime = 0;
@@ -9875,11 +10056,11 @@ function calcResampledFrontier() {
     frontierHi.push(Math.round(hi * 100) / 100);
   }
 
-  // Enforce monotonicity (frontier should never decrease)
+  // Keep the mean glidepath monotonic (a higher risk tier should not show a
+  // lower modelled return). Do NOT force the ±1σ band monotonic — that
+  // artificially flattened the lower edge and hid real estimation sensitivity.
   for (var i = 1; i < 10; i++) {
     if (frontierMean[i] < frontierMean[i-1]) frontierMean[i] = frontierMean[i-1] + 0.1;
-    if (frontierLo[i] < frontierLo[i-1]) frontierLo[i] = frontierLo[i-1];
-    if (frontierHi[i] < frontierHi[i-1]) frontierHi[i] = frontierHi[i-1] + 0.1;
   }
 
   _cachedFrontier = { mean: frontierMean, lo: frontierLo, hi: frontierHi };
@@ -9922,15 +10103,8 @@ function calcPortfolioRiskMetrics(holdingsList) {
   if (n <= 1) {
     divSigma = wSigma;
   } else {
-    // Full variance = Σᵢ Σⱼ wᵢwⱼσᵢσⱼρᵢⱼ
-    var portfolioVar = 0;
-    for (var i = 0; i < items.length; i++) {
-      for (var j = 0; j < items.length; j++) {
-        var corr = (i === j) ? 1.0 : getPairCorrelation(holdingsList[i], holdingsList[j]);
-        portfolioVar += items[i].weight * items[j].weight * items[i].sigma * items[j].sigma * corr;
-      }
-    }
-    divSigma = Math.sqrt(Math.max(0, portfolioVar));
+    // Full variance via the shared PSD-safe helper (same engine as calcPortfolioRisk).
+    divSigma = _diversifiedVolPct(holdingsList, items.map(function(it){ return it.weight; }));
   }
 
   var wr = weightedReturn(null);
@@ -10375,7 +10549,10 @@ try {
     // Seed refresh_token to Edge Function (idempotent), then mint an access_token.
     await _seedDriveTokensIfNeeded();
     var tok = await getDriveAccessToken();
-    console.log('[CKG] Hub boot:', sess.user && sess.user.email, '| drive token:', tok ? 'ok' : 'reconnect-needed');
+    console.log('[CKG] Hub boot: session active | drive token:', tok ? 'ok' : 'reconnect-needed');
+    // One-time hygiene: purge any legacy client-side OpenAI key left by the old
+    // (pre-proxy) document-scan build. Scanning now uses the hub proxy, no key.
+    try { localStorage.removeItem('fundlens_openai_key'); } catch(e) {}
     // Now that we have the JWT, re-fetch FX rate (the boot-time call ran
     // before the session was hydrated, so it returned null).
     try { fetchUSDSGD(); } catch(e) {}
