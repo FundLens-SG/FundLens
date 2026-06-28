@@ -1,0 +1,9 @@
+{
+  "name": "fundlens",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FundLens — fund analysis & portfolio construction (single-file app). Tests extract the model from index.html.",
+  "scripts": {
+    "test": "node test/model.test.mjs"
+  }
+}
